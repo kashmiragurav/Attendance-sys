@@ -62,21 +62,35 @@ export default function AdminEditAttendanceScreen({ route, navigation }) {
             const attendanceDate = record?.date || route.params.date;
             const docId = record?.id || `att_${employee.uid}_${attendanceDate}`;
 
-            const updatedData = {
-                status,
-                checkInTime: isNoTimeStatus ? '' : checkIn,
-                checkOutTime: isNoTimeStatus ? '' : checkOut,
-                workHours: isNoTimeStatus ? 0 : workHours,
-                updatedAt: new Date().toISOString(),
-                // Ensure core fields exist if creating new
-                userId: employee.uid,
-                employeeId: employee.employeeId,
-                employeeName: employee.name,
-                companyId: employee.companyId,
-                date: attendanceDate,
-            };
+            const isNewRecord = !record?.id;
 
-            await db.collection('attendance').doc(docId).set(updatedData);
+            if (isNewRecord) {
+                // Creating a brand-new record — use set() with all required fields
+                const newData = {
+                    id: docId,
+                    status,
+                    checkInTime: isNoTimeStatus ? '' : checkIn,
+                    checkOutTime: isNoTimeStatus ? '' : checkOut,
+                    workHours: isNoTimeStatus ? 0 : workHours,
+                    updatedAt: new Date().toISOString(),
+                    userId: employee.uid,
+                    employeeId: employee.employeeId,
+                    employeeName: employee.name,
+                    companyId: employee.companyId,
+                    date: attendanceDate,
+                };
+                await db.collection('attendance').doc(docId).set(newData);
+            } else {
+                // Updating existing record — use update() to preserve sessions, location, photos
+                const updateFields = {
+                    status,
+                    checkInTime: isNoTimeStatus ? '' : checkIn,
+                    checkOutTime: isNoTimeStatus ? '' : checkOut,
+                    workHours: isNoTimeStatus ? 0 : workHours,
+                    updatedAt: new Date().toISOString(),
+                };
+                await db.collection('attendance').doc(docId).update(updateFields);
+            }
 
             Alert.alert('Success', 'Attendance updated successfully');
             navigation.goBack();

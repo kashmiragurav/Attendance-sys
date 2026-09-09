@@ -395,7 +395,7 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
             if (action === 'check-in') {
                 // Check-in logic
                 const attendanceId = todayRecord ? todayRecord.id : `att_${user.uid}_${today}`;
-                const settings = {
+                const settings = officeSettings || {
                     officeStartTime: '09:30',
                     gracePeriodMinutes: 10,
                     fullDayHours: 9,
@@ -480,9 +480,7 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
 
                 const firstCheckIn = new Date(sessions[0].checkIn);
                 const status = calculateAttendanceStatus(firstCheckIn, now, {
-                    officeStartTime: '09:30',
-                    gracePeriodMinutes: 10,
-                    fullDayHours: 9,
+                    ...(officeSettings || { officeStartTime: '09:30', gracePeriodMinutes: 10, fullDayHours: 9 }),
                     workHours: totalWorkHours,
                 });
 
