@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebaseConfig';
 import { formatDate, formatTime, calculateAttendanceStatus, isAttendanceMarkedToday } from '../utils/attendance';
+import { resolveConfig } from '../utils/attendanceConfig';
 import Colors, { gradients, shadows } from '../constants/Colors';
 
 export default function AttendanceScanScreen({ navigation }) {
@@ -31,7 +32,7 @@ export default function AttendanceScanScreen({ navigation }) {
 
             // Load office settings
             const settingsDoc = await db.collection('office_settings').doc('settings_default').get();
-            const settings = settingsDoc.exists ? settingsDoc.data() : getDefaultSettings();
+            const settings = settingsDoc.exists ? resolveConfig(settingsDoc.data()) : resolveConfig(null);
             setOfficeSettings(settings);
 
             // Load today's attendance
@@ -55,13 +56,7 @@ export default function AttendanceScanScreen({ navigation }) {
         }
     };
 
-    const getDefaultSettings = () => ({
-        officeStartTime: '09:30',  // 9:30 AM
-        officeEndTime: '18:30',    // 6:30 PM
-        gracePeriodMinutes: 10,    // 10 minutes grace
-        halfDayHours: 4.5,         // Minimum for half day
-        fullDayHours: 9,           // 9 hours for full day
-    });
+    const getDefaultSettings = () => resolveConfig(null);
 
     const handleCheckIn = async () => {
         // Temporarily disabled - allow face scanning without registration for testing

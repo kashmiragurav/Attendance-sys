@@ -32,6 +32,7 @@ import AdminEmployeesScreen from './screens/admin/AdminEmployeesScreen';
 import AdminLocationMapScreen from './screens/admin/AdminLocationMapScreen';
 import AdminLogsScreen from './screens/admin/AdminLogsScreen';
 import AdminWorkReportScreen from './screens/admin/AdminWorkReportScreen';
+import SuperAdminAttendanceConfigScreen from './screens/admin/SuperAdminAttendanceConfigScreen';
 import SuperAdminCompanyDetailsScreen from './screens/admin/SuperAdminCompanyDetailsScreen';
 import SuperAdminDashboardScreen from './screens/admin/SuperAdminDashboardScreen';
 
@@ -61,6 +62,7 @@ function SuperAdminStack() {
     >
       <Stack.Screen name="SuperAdminDashboard" component={SuperAdminDashboardScreen} />
       <Stack.Screen name="SuperAdminCompanyDetails" component={SuperAdminCompanyDetailsScreen} />
+      <Stack.Screen name="SuperAdminAttendanceConfig" component={SuperAdminAttendanceConfigScreen} />
     </Stack.Navigator>
   );
 }

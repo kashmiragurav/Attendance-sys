@@ -84,76 +84,67 @@ export const calculateLateMinutes = (checkInTime, officeStartTime, gracePeriodMi
 };
 
 /**
- * Calculate attendance status
- * Business Rules:
- * - Office Start: 9:30 AM
- * - Grace Period: 10 minutes (until 9:40 AM)
- * - Late (Half Day): Check-in after 9:40 AM
- * - Office End: 6:30 PM
- * - Full Day: 9 hours of work
- * - Half Day: Less than 9 hours OR late check-in
+ * Calculate attendance status.
+ * Reads all fields from the active attendance config (utils/attendanceConfig.js defaults apply
+ * when a field is absent so this function is always safe to call with a partial settings object).
  */
 export const calculateAttendanceStatus = (checkIn, checkOut, settings) => {
     const {
-        officeStartTime = '09:30', // Changed to 9:30 AM
-        officeEndTime = '18:30',   // 6:30 PM
-        gracePeriodMinutes = 10,   // Changed to 10 minutes
-        halfDayHours = 4.5,        // Minimum for half day
-        fullDayHours = 9,          // Changed to 9 hours for full day
+        officeStartTime = '09:30',
+        gracePeriodMinutes = 10,
+        halfDayHours = 4.5,
+        fullDayHours = 9,
+        latePunchInHandling = 'mark_late',
+        earlyCheckoutHandling = 'mark_half_day',
+        overtimeEnabled = false,
+        overtimeThresholdHours = 9,
+        breakEnabled = false,
+        breakDeductFromHours = false,
+        totalBreakMinutes = 0,   // passed in from session data when available
     } = settings;
 
-    // If no check-in, mark as absent
     if (!checkIn) {
-        return {
-            status: 'absent',
-            workHours: 0,
-            isLate: false,
-            lateMinutes: 0,
-        };
+        return { status: 'absent', workHours: 0, isLate: false, lateMinutes: 0, overtimeHours: 0 };
     }
 
-    // Calculate work hours - prioritize provided workHours from settings (for multi-session)
+    // Work hours — prefer pre-calculated value (multi-session) over raw diff
     let workHours = settings.workHours !== undefined
         ? settings.workHours
         : (checkOut ? parseFloat(calculateHours(checkIn, checkOut)) : 0);
 
-    // Check if late (after grace period)
+    // Deduct break time if configured
+    if (breakEnabled && breakDeductFromHours && totalBreakMinutes > 0) {
+        workHours = Math.max(0, workHours - totalBreakMinutes / 60);
+    }
+
     const late = isLate(checkIn, officeStartTime, gracePeriodMinutes);
     const lateMinutes = calculateLateMinutes(checkIn, officeStartTime, gracePeriodMinutes);
 
-    // Determine status
     let status = 'present';
+    let overtimeHours = 0;
 
     if (checkOut) {
-        // Check-out done, calculate final status
-        if (late) {
-            // Late check-in (after 9:40 AM) = Half Day
+        if (late && latePunchInHandling === 'mark_half_day') {
             status = 'half_day';
+        } else if (late && latePunchInHandling === 'mark_late') {
+            // Late but still evaluate hours for full/half
+            status = workHours >= fullDayHours ? 'late' : 'half_day';
         } else if (workHours >= fullDayHours) {
-            // 9+ hours = Full Day (Present)
             status = 'present';
         } else if (workHours >= halfDayHours) {
-            // 4.5 to 9 hours = Half Day
-            status = 'half_day';
+            status = earlyCheckoutHandling === 'mark_absent' ? 'absent' : 'half_day';
         } else {
-            // Less than 4.5 hours = Half Day
-            status = 'half_day';
+            status = earlyCheckoutHandling === 'mark_absent' ? 'absent' : 'half_day';
+        }
+
+        if (overtimeEnabled && workHours > overtimeThresholdHours) {
+            overtimeHours = parseFloat((workHours - overtimeThresholdHours).toFixed(2));
         }
     } else {
-        // Only check-in, no check-out yet
-        if (late) {
-            status = 'late'; // Temporary status, will be half_day after checkout
-        } else {
-            status = 'present';
-        }
+        status = late ? 'late' : 'present';
     }
 
-    return {
-        status,
-        workHours,
-        isLate: late,
-        lateMinutes,
-    };
+    return { status, workHours, isLate: late, lateMinutes, overtimeHours };
 };
 
 /**
