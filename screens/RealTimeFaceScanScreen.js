@@ -24,6 +24,7 @@ import { db } from '../services/firebaseConfig';
 import { getDetailedAddress } from '../services/googleMapsService'; // Assuming this import existed
 import { calculateAttendanceStatus, formatDate, formatTime } from '../utils/attendance';
 import { resolveConfig } from '../utils/attendanceConfig';
+import { acquireLocation, validateGeoFence } from '../utils/locationValidator';
 import { faceDetectorSettings, isNativeDetectorAvailable } from '../utils/faceRecognition';
 
 export default function RealTimeFaceScanScreen({ navigation, route }) {
@@ -93,86 +94,35 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
     }, [cameraReady]);
 
     const getLocation = async () => {
-        try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-
-            if (status !== 'granted') {
-                console.log('Location permission not granted');
-                return;
-            }
-
-            const currentLocation = await Location.getCurrentPositionAsync({
-                accuracy: Location.Accuracy.High,
-            });
-
-            // Try Google Maps API first for detailed address
-            let addressText = 'Unknown Location';
-            let fullAddressData = {};
-
-            try {
-                // Try Google Maps API first (with error handling)
-                let googleResult = { success: false };
-                try {
-                    googleResult = await getDetailedAddress(
-                        currentLocation.coords.latitude,
-                        currentLocation.coords.longitude
-                    );
-                } catch (googleError) {
-                    console.log('⚠️ Google Maps API error:', googleError.message);
-                }
-
-                if (googleResult.success && googleResult.formattedAddress) {
-                    addressText = googleResult.formattedAddress;
-                    fullAddressData = googleResult.components || {};
-                    console.log('✅ Google Maps Address:', addressText);
-                } else {
-                    // Fallback to Expo Location reverse geocoding
-                    console.log('📍 Using Expo Location fallback...');
-                    const geocode = await Location.reverseGeocodeAsync({
-                        latitude: currentLocation.coords.latitude,
-                        longitude: currentLocation.coords.longitude,
-                    });
-
-                    if (geocode && geocode.length > 0) {
-                        const address = geocode[0];
-                        fullAddressData = address;
-
-                        console.log('📍 Expo geocode result:', address);
-
-                        const addressParts = [];
-                        if (address.name && address.name !== address.street) addressParts.push(address.name);
-                        if (address.street) addressParts.push(address.street);
-                        if (address.district || address.subregion) addressParts.push(address.district || address.subregion);
-                        if (address.city) addressParts.push(address.city);
-                        if (address.region) addressParts.push(address.region);
-                        if (address.postalCode) addressParts.push(address.postalCode);
-
-                        addressText = addressParts.length > 0
-                            ? addressParts.join(', ')
-                            : `${address.city || address.region || 'Unknown Location'}`;
-
-                        console.log('✅ Expo Address:', addressText);
-                    } else {
-                        console.log('❌ No Expo geocode results');
-                    }
-                }
-            } catch (geocodeError) {
-                console.log('❌ Geocoding error:', geocodeError);
-                // Final fallback to coordinates
-                addressText = `${currentLocation.coords.latitude.toFixed(4)}, ${currentLocation.coords.longitude.toFixed(4)}`;
-            }
-
-            setLocation({
-                latitude: currentLocation.coords.latitude,
-                longitude: currentLocation.coords.longitude,
-                accuracy: currentLocation.coords.accuracy,
-                timestamp: new Date().toISOString(),
-                address: addressText,
-                addressComponents: fullAddressData,
-            });
-        } catch (error) {
-            console.error('Error getting location:', error);
+        const result = await acquireLocation();
+        if (!result.ok) {
+            // Non-blocking background fetch — errors surface at capture time
+            console.log('Location fetch failed:', result.errorCode, result.message);
+            return;
         }
+        const { coords } = result;
+
+        // Best-effort reverse geocode for display only
+        let addressText = `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`;
+        try {
+            let googleResult = { success: false };
+            try {
+                googleResult = await getDetailedAddress(coords.latitude, coords.longitude);
+            } catch { /* ignore */ }
+
+            if (googleResult.success && googleResult.formattedAddress) {
+                addressText = googleResult.formattedAddress;
+            } else {
+                const geocode = await Location.reverseGeocodeAsync({ latitude: coords.latitude, longitude: coords.longitude });
+                if (geocode?.length > 0) {
+                    const a = geocode[0];
+                    const parts = [a.name, a.street, a.district || a.subregion, a.city, a.region, a.postalCode].filter(Boolean);
+                    if (parts.length > 0) addressText = parts.join(', ');
+                }
+            }
+        } catch { /* display fallback already set */ }
+
+        setLocation({ ...coords, address: addressText });
     };
 
     const hasNativeDetector = isNativeDetectorAvailable();
@@ -285,96 +235,124 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
     const handleCapture = async () => {
         if (processing || !cameraReady) return;
 
-        // Check WiFi before starting capture
         const isWifiValid = await checkWifi();
         if (!isWifiValid) return;
 
-        try {
-            setProcessing(true);
-            setShowCountdown(false);
+        setProcessing(true);
+        setShowCountdown(false);
+        let navigatedAway = false;
 
-            // 1. Capture photo
+        try {
             if (!cameraRef.current) {
-                throw new Error('Camera not initialized');
+                Alert.alert('Camera Unavailable', 'The camera is not ready. Please wait a moment and try again.');
+                return;
             }
 
-            const photo = await cameraRef.current.takePictureAsync({
-                quality: 0.1, // Low quality for fast capture
-                base64: false,
-            });
+            let photo;
+            try {
+                photo = await cameraRef.current.takePictureAsync({ quality: 0.1, base64: false });
+            } catch (captureError) {
+                console.error('Photo capture failed:', captureError);
+                Alert.alert('Capture Failed', 'Could not capture a photo. Please ensure the camera is not in use by another app and try again.');
+                return;
+            }
 
-            // 2. Compress & Resize (Crucial for Firestore 1MB limit)
-            const manipulatedImage = await manipulateAsync(
-                photo.uri,
-                [{ resize: { width: 500 } }], // Increased for better clarity in Admin Panel
-                { compress: 0.7, format: SaveFormat.JPEG, base64: true }
-            );
+            if (!photo?.uri) {
+                Alert.alert('Capture Failed', 'No image was captured. Please try again.');
+                return;
+            }
 
-            // 3. Verify & Proceed
-            console.log(`📸 Image Size: ${Math.round(manipulatedImage.base64.length / 1024)} KB`);
+            let manipulatedImage;
+            try {
+                manipulatedImage = await manipulateAsync(
+                    photo.uri,
+                    [{ resize: { width: 500 } }],
+                    { compress: 0.7, format: SaveFormat.JPEG, base64: true }
+                );
+            } catch (manipError) {
+                console.error('Image processing failed:', manipError);
+                Alert.alert('Processing Failed', 'Could not process the captured image. Please try again.');
+                return;
+            }
+
+            if (!manipulatedImage?.base64) {
+                Alert.alert('Processing Failed', 'Image data is invalid. Please try again.');
+                return;
+            }
+
+            navigatedAway = true; // verifyAndProceed handles its own reset on failure
             await verifyAndProceed(manipulatedImage.uri, manipulatedImage.base64);
 
         } catch (error) {
-            console.error('Error capturing photo:', error);
-            Alert.alert('Error', 'Failed to capture photo. Please try again.');
-            setProcessing(false);
-            setLivenessStatus('waiting');
+            console.error('Unexpected capture error:', error);
+            Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+        } finally {
+            if (!navigatedAway) {
+                setProcessing(false);
+                setLivenessStatus('waiting');
+            }
         }
     };
 
     const verifyAndProceed = async (photoUri, base64) => {
         try {
-            // 1. Backend Verification
+            // 1. Face verification via backend
             const threshold = officeSettings?.faceThreshold || 0.6;
-            const apiResult = await faceApiService.verifyFace(user.uid, base64, threshold);
-
-            if (!apiResult.success || !apiResult.isMatch) {
-                throw new Error(apiResult.error || 'Face match failed');
+            let apiResult;
+            try {
+                apiResult = await faceApiService.verifyFace(user.uid, base64, threshold);
+            } catch (apiError) {
+                console.error('Face API call failed:', apiError);
+                throw new Error('Face verification service is unavailable. Please try again.');
             }
 
-            // 2. Extra Checks (Location)
-            let verified = true;
-            let detectionFlags = [];
+            if (!apiResult.success) {
+                throw new Error(apiResult.error || 'Face verification failed. Please try again.');
+            }
 
-            // Geo-fencing check
+            if (!apiResult.isMatch) {
+                throw new Error('Face does not match the registered profile. Attendance cannot be marked.');
+            }
+
+            // Track whether this was a real verification or simulated
+            const isSimulated = apiResult.simulated === true;
+
+            // 2. Geo-fencing check
             if (isFeatureEnabled(FEATURES.GEO_LOCATION) && officeSettings?.geoFencing?.enabled && !isWFH) {
-                const officeLat = officeSettings.geoFencing.latitude || 18.5204;
-                const officeLng = officeSettings.geoFencing.longitude || 73.8567;
-                const radius = officeSettings.geoFencing.radius || 200;
-
-                if (location) {
-                    const distance = calculateDistance(location.latitude, location.longitude, officeLat, officeLng);
-                    if (distance > radius) {
-                        verified = false;
-                        detectionFlags.push(`Out of Range (${Math.round(distance)}m)`);
-                    }
+                const coordsToCheck = location || null;
+                if (!coordsToCheck) {
+                    const recheck = await acquireLocation();
+                    if (!recheck.ok) throw new Error(recheck.message);
+                    setLocation({ ...recheck.coords });
+                    const fenceResult = validateGeoFence(recheck.coords, officeSettings.geoFencing);
+                    if (!fenceResult.ok) throw new Error(fenceResult.message);
                 } else {
-                    verified = false;
-                    detectionFlags.push('Location required');
+                    const fenceResult = validateGeoFence(coordsToCheck, officeSettings.geoFencing);
+                    if (!fenceResult.ok) throw new Error(fenceResult.message);
                 }
             }
 
-            if (verified) {
-                await markAttendance(base64);
-                Alert.alert('Success! ✅', `Face Verified (Match: ${Math.round(apiResult.matchScore * 100)}%)`, [
-                    {
-                        text: 'OK', onPress: () => {
-                            navigation.goBack();
-                            if (onSuccess) onSuccess(location);
-                        }
-                    }
-                ]);
-            } else {
-                throw new Error(detectionFlags.join(', '));
-            }
+            // 3. Mark attendance — pass simulation flag so the record is honest
+            await markAttendance(base64, isSimulated);
+
+            const matchLabel = isSimulated
+                ? 'Photo captured (verification pending backend)'
+                : `Match score: ${Math.round((apiResult.matchScore || 0) * 100)}%`;
+
+            Alert.alert(
+                'Attendance Marked ✅',
+                matchLabel,
+                [{ text: 'OK', onPress: () => { navigation.goBack(); if (onSuccess) onSuccess(location); } }]
+            );
         } catch (error) {
-            Alert.alert('Verification Failed ❌', error.message);
+            console.error('verifyAndProceed error:', error);
+            Alert.alert('Verification Failed', error.message || 'An unexpected error occurred. Please try again.');
             setProcessing(false);
             setLivenessStatus('waiting');
         }
     };
 
-    const markAttendance = async (base64Image) => {
+    const markAttendance = async (base64Image, isSimulated = false) => {
         try {
             const now = new Date();
             const today = formatDate(now);
@@ -427,7 +405,9 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                     isLate: status.isLate,
                     lateMinutes: status.lateMinutes || 0,
                     method: isWFH ? 'wfh_scan' : 'face_scan',
-                    faceVerified: true,
+                    // faceVerified is true only when the backend performed a real embedding comparison.
+                    // When SIMULATION_MODE is on, this is false — the record is honest.
+                    faceVerified: !isSimulated,
                     isWFH: !!isWFH,
                     deviceId: await AsyncStorage.getItem('app_device_id') || 'Unknown',
                     location: location,
@@ -504,21 +484,6 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
         }
     };
 
-    const calculateDistance = (lat1, lon1, lat2, lon2) => {
-        const R = 6371e3; // metres
-        const φ1 = lat1 * Math.PI / 180;
-        const φ2 = lat2 * Math.PI / 180;
-        const Δφ = (lat2 - lat1) * Math.PI / 180;
-        const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-        return R * c; // in metres
-    };
-
     if (!permission) {
         return (
             <View style={styles.loadingContainer}>
@@ -530,8 +495,34 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
 
     if (!permission.granted) {
         return (
-            <View style={styles.container}>
-                <Text style={styles.errorText}>Camera permission denied</Text>
+            <View style={styles.permissionContainer}>
+                <Ionicons name="camera-off-outline" size={64} color="#E74C3C" />
+                <Text style={styles.permissionTitle}>Camera Access Required</Text>
+                <Text style={styles.permissionText}>
+                    Camera permission is required to verify your identity for attendance.
+                    Please enable it in your device Settings.
+                </Text>
+                <TouchableOpacity
+                    style={styles.permissionButton}
+                    onPress={async () => {
+                        const result = await requestPermission();
+                        if (!result.granted) {
+                            Alert.alert(
+                                'Permission Denied',
+                                'Camera access was denied. Please enable it in Settings to use face attendance.',
+                                [{ text: 'OK' }]
+                            );
+                        }
+                    }}
+                >
+                    <Text style={styles.permissionButtonText}>Grant Permission</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={styles.permissionCancelButton}
+                    onPress={() => navigation.goBack()}
+                >
+                    <Text style={styles.permissionCancelText}>Go Back</Text>
+                </TouchableOpacity>
             </View>
         );
     }
@@ -812,5 +803,47 @@ const styles = StyleSheet.create({
         color: '#FFF',
         fontSize: 12,
         fontWeight: 'bold',
+    },
+    permissionContainer: {
+        flex: 1,
+        backgroundColor: '#000',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 32,
+    },
+    permissionTitle: {
+        fontSize: 22,
+        fontWeight: 'bold',
+        color: '#FFF',
+        marginTop: 20,
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    permissionText: {
+        fontSize: 15,
+        color: 'rgba(255,255,255,0.7)',
+        textAlign: 'center',
+        lineHeight: 22,
+        marginBottom: 32,
+    },
+    permissionButton: {
+        backgroundColor: '#37B46F',
+        paddingHorizontal: 36,
+        paddingVertical: 14,
+        borderRadius: 28,
+        marginBottom: 12,
+    },
+    permissionButtonText: {
+        color: '#FFF',
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    permissionCancelButton: {
+        paddingHorizontal: 36,
+        paddingVertical: 12,
+    },
+    permissionCancelText: {
+        color: 'rgba(255,255,255,0.6)',
+        fontSize: 15,
     },
 });

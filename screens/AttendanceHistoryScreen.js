@@ -326,52 +326,72 @@ export default function AttendanceHistoryScreen({ navigation }) {
             >
                 <View style={styles.detailsOverlay}>
                     <View style={styles.detailsContent}>
-                        <View style={styles.detailsHeader}>
-                            <Text style={styles.detailsDate}>
-                                {new Date(selectedDay?.date).toLocaleDateString('en-GB', {
-                                    weekday: 'long',
-                                    day: 'numeric',
-                                    month: 'long',
-                                    year: 'numeric'
-                                })}
-                            </Text>
-                            <TouchableOpacity onPress={() => setShowDetailsModal(false)}>
-                                <Ionicons name="close-circle" size={28} color="#AEAEB2" />
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            <View style={styles.detailsHeader}>
+                                <Text style={styles.detailsDate}>
+                                    {new Date(selectedDay?.date).toLocaleDateString('en-GB', {
+                                        weekday: 'long',
+                                        day: 'numeric',
+                                        month: 'long',
+                                        year: 'numeric'
+                                    })}
+                                </Text>
+                                <TouchableOpacity onPress={() => setShowDetailsModal(false)}>
+                                    <Ionicons name="close-circle" size={28} color="#AEAEB2" />
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.statusBadgeLarge}>
+                                <View style={[styles.statusDot, { backgroundColor: getStatusColor(selectedDay?.status || 'absent') }]} />
+                                <Text style={styles.statusTextLarge}>{selectedDay?.status?.toUpperCase() || 'ABSENT'}</Text>
+                            </View>
+
+                            <View style={styles.detailsGrid}>
+                                {selectedDay?.sessions?.length > 0 ? (
+                                    <>
+                                        {selectedDay.sessions.map((s, i) => (
+                                            <View key={i} style={styles.sessionBlock}>
+                                                <Text style={styles.sessionBlockLabel}>Session {i + 1}</Text>
+                                                <DetailRow icon="time-outline" label="Check In" value={s.checkInTime || '--:--'} color="#2ECC71" />
+                                                <DetailRow icon="log-out-outline" label="Check Out" value={s.checkOutTime || '--:--'} color="#E74C3C" />
+                                                <DetailRow icon="hourglass-outline" label="Session Hours" value={`${s.sessionHours?.toFixed(1) || '0.0'} hrs`} color="#4A90E2" />
+                                            </View>
+                                        ))}
+                                        {selectedDay?.breaks?.filter(b => b.end).length > 0 && (
+                                            <View style={[styles.sessionBlock, { borderLeftColor: '#F39C12' }]}>
+                                                <Text style={[styles.sessionBlockLabel, { color: '#F39C12' }]}>Breaks</Text>
+                                                {selectedDay.breaks.filter(b => b.end).map((b, i) => (
+                                                    <DetailRow
+                                                        key={i}
+                                                        icon="cafe-outline"
+                                                        label={`Break ${i + 1}`}
+                                                        value={`${b.startTime} \u2192 ${b.endTime} (${b.durationMinutes}m)`}
+                                                        color="#F39C12"
+                                                    />
+                                                ))}
+                                                <DetailRow
+                                                    icon="remove-circle-outline"
+                                                    label="Total Break"
+                                                    value={`${selectedDay.totalBreakMinutes ?? selectedDay.breaks.filter(b => b.end).reduce((t, b) => t + (b.durationMinutes || 0), 0)} min`}
+                                                    color="#E67E22"
+                                                />
+                                            </View>
+                                        )}
+                                        <DetailRow icon="calculator-outline" label="Total Working Hours" value={`${selectedDay?.workHours?.toFixed(1) || '0.0'} Hours`} color="#9B59B6" />
+                                    </>
+                                ) : (
+                                    <>
+                                        <DetailRow icon="time-outline" label="Check In" value={selectedDay?.checkIn ? new Date(selectedDay.checkIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'} color="#2ECC71" />
+                                        <DetailRow icon="log-out-outline" label="Check Out" value={selectedDay?.checkOut ? new Date(selectedDay.checkOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'} color="#E74C3C" />
+                                        <DetailRow icon="hourglass-outline" label="Working Hours" value={`${selectedDay?.workHours?.toFixed(1) || '0.0'} Hours`} color="#4A90E2" />
+                                    </>
+                                )}
+                            </View>
+
+                            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowDetailsModal(false)}>
+                                <Text style={styles.closeBtnText}>CLOSE</Text>
                             </TouchableOpacity>
-                        </View>
-
-                        <View style={styles.statusBadgeLarge}>
-                            <View style={[styles.statusDot, { backgroundColor: getStatusColor(selectedDay?.status || 'absent') }]} />
-                            <Text style={styles.statusTextLarge}>{selectedDay?.status?.toUpperCase() || 'ABSENT'}</Text>
-                        </View>
-
-                        <View style={styles.detailsGrid}>
-                            <DetailRow
-                                icon="time-outline"
-                                label="Check In"
-                                value={selectedDay?.checkIn ? new Date(selectedDay.checkIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                                color="#2ECC71"
-                            />
-                            <DetailRow
-                                icon="log-out-outline"
-                                label="Check Out"
-                                value={selectedDay?.checkOut ? new Date(selectedDay.checkOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                                color="#E74C3C"
-                            />
-                            <DetailRow
-                                icon="hourglass-outline"
-                                label="Working Hours"
-                                value={`${selectedDay?.workHours?.toFixed(1) || '0.0'} Hours`}
-                                color="#4A90E2"
-                            />
-                        </View>
-
-                        <TouchableOpacity
-                            style={styles.closeBtn}
-                            onPress={() => setShowDetailsModal(false)}
-                        >
-                            <Text style={styles.closeBtnText}>CLOSE</Text>
-                        </TouchableOpacity>
+                        </ScrollView>
                     </View>
                 </View>
             </Modal>
@@ -694,6 +714,23 @@ const styles = StyleSheet.create({
     detailsGrid: {
         gap: 20,
         marginBottom: 35,
+    },
+    sessionBlock: {
+        backgroundColor: '#F9F9FB',
+        borderRadius: 12,
+        padding: 12,
+        gap: 10,
+        marginBottom: 8,
+        borderLeftWidth: 3,
+        borderLeftColor: '#4A90E2',
+    },
+    sessionBlockLabel: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#4A90E2',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: 4,
     },
     detailRowContainer: {
         flexDirection: 'row',

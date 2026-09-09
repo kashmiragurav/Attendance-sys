@@ -300,8 +300,11 @@ export const canCheckOut = (attendanceRecords) => {
  * Validate geo-location (if geo-fencing enabled)
  */
 export const validateLocation = (currentLocation, officeLocation, radiusMeters = 100) => {
-    if (!currentLocation || !officeLocation) {
-        return { success: true, withinRange: true }; // Skip if not configured
+    if (!officeLocation) {
+        return { success: true, withinRange: true }; // Not configured — skip
+    }
+    if (!currentLocation) {
+        return { success: false, withinRange: false, message: 'Current location is unavailable.' };
     }
 
     const distance = calculateDistance(

@@ -7,6 +7,7 @@ import {
     StatusBar,
     Alert,
     ActivityIndicator,
+    ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebaseConfig';
 import { formatDate, formatTime, calculateAttendanceStatus, isAttendanceMarkedToday } from '../utils/attendance';
 import { resolveConfig } from '../utils/attendanceConfig';
+import { checkAttendanceLocation } from '../utils/locationValidator';
 import Colors, { gradients, shadows } from '../constants/Colors';
 
 export default function AttendanceScanScreen({ navigation }) {
@@ -21,6 +23,7 @@ export default function AttendanceScanScreen({ navigation }) {
     const [loading, setLoading] = useState(false);
     const [todayAttendance, setTodayAttendance] = useState(null);
     const [officeSettings, setOfficeSettings] = useState(null);
+    const [breakLoading, setBreakLoading] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -59,36 +62,26 @@ export default function AttendanceScanScreen({ navigation }) {
     const getDefaultSettings = () => resolveConfig(null);
 
     const handleCheckIn = async () => {
-        // Temporarily disabled - allow face scanning without registration for testing
-        // if (!user.faceRegistered) {
-        //     Alert.alert(
-        //         'Face Not Registered',
-        //         'Please register your face first to use face-based attendance.',
-        //         [
-        //             { text: 'Cancel', style: 'cancel' },
-        //             {
-        //                 text: 'Register Now',
-        //                 onPress: () => navigation.navigate('FaceRegistration')
-        //             }
-        //         ]
-        //     );
-        //     return;
-        // }
-
-        // Launch appropriate scanner based on plan
         if (isFeatureEnabled(FEATURES.FACE_RECOGNITION)) {
             navigation.navigate('RealTimeFaceScan', {
                 action: 'check-in',
                 onSuccess: performCheckIn
             });
         } else {
-            // Fallback for non-face plans: Just use Geo-location
-            // We simulate a geo-scan here or use a dedicated simple scan screen
-            performCheckIn({ latitude: 18.5204, longitude: 73.8567 }); // Mock location
+            setLoading(true);
+            const settings = officeSettings || getDefaultSettings();
+            const locResult = await checkAttendanceLocation(settings);
+            setLoading(false);
+            if (!locResult.ok) {
+                Alert.alert('Location Error', locResult.message);
+                return;
+            }
+            performCheckIn(locResult.locationData);
         }
     };
 
     const performCheckIn = async (locationData) => {
+        if (loading) return; // prevent double-click
         try {
             setLoading(true);
 
@@ -96,9 +89,11 @@ export default function AttendanceScanScreen({ navigation }) {
             const today = formatDate(now);
             const settings = officeSettings || getDefaultSettings();
 
-            // Check if already checked in (but not checked out)
-            if (todayAttendance && todayAttendance.checkIn && !todayAttendance.checkOut) {
-                Alert.alert('Already Checked In', 'Please check-out first before checking in again.');
+            // Block if there is an active (unclosed) session
+            const sessions = todayAttendance?.sessions || [];
+            const hasActiveSession = sessions.some(s => s.checkIn && !s.checkOut);
+            if (hasActiveSession) {
+                Alert.alert('Active Session', 'Please check-out first before starting a new session.');
                 return;
             }
 
@@ -204,60 +199,39 @@ export default function AttendanceScanScreen({ navigation }) {
     };
 
     const handleCheckOut = async () => {
-        // Temporarily disabled - allow face scanning without registration for testing
-        // if (!user.faceRegistered) {
-        //     Alert.alert(
-        //         'Face Not Registered',
-        //         'Please register your face first to use face-based attendance.',
-        //         [
-        //             { text: 'Cancel', style: 'cancel' },
-        //             {
-        //                 text: 'Register Now',
-        //                 onPress: () => navigation.navigate('FaceRegistration')
-        //             }
-        //         ]
-        //     );
-        //     return;
-        // }
-
-        // Launch scanner based on plan
         if (isFeatureEnabled(FEATURES.FACE_RECOGNITION)) {
             navigation.navigate('RealTimeFaceScan', {
                 action: 'check-out',
                 onSuccess: performCheckOut
             });
         } else {
-            performCheckOut({ latitude: 18.5204, longitude: 73.8567 });
+            setLoading(true);
+            const settings = officeSettings || getDefaultSettings();
+            const locResult = await checkAttendanceLocation(settings);
+            setLoading(false);
+            if (!locResult.ok) {
+                Alert.alert('Location Error', locResult.message);
+                return;
+            }
+            performCheckOut(locResult.locationData);
         }
     };
 
     const performCheckOut = async (locationData) => {
+        if (loading) return; // prevent double-click
         try {
             setLoading(true);
 
-            if (!todayAttendance || !todayAttendance.checkIn) {
-                Alert.alert('No Check-In Found', 'Please check-in first before checking out.');
-                return;
-            }
+            const sessions = todayAttendance?.sessions || [];
+            const currentSessionIndex = sessions.findIndex(s => s.checkIn && !s.checkOut);
 
-            if (todayAttendance.checkOut) {
-                Alert.alert('Already Checked Out', 'You have already checked out for this session.');
+            if (!todayAttendance || currentSessionIndex === -1) {
+                Alert.alert('No Active Session', 'Please check-in first before checking out.');
                 return;
             }
 
             const now = new Date();
             const settings = officeSettings || getDefaultSettings();
-
-            // Get sessions array
-            const sessions = todayAttendance.sessions || [];
-
-            // Find the current active session (last session without checkout)
-            const currentSessionIndex = sessions.findIndex(s => !s.checkOut);
-
-            if (currentSessionIndex === -1) {
-                Alert.alert('Error', 'No active session found.');
-                return;
-            }
 
             // Update current session with check-out
             const currentSession = sessions[currentSessionIndex];
@@ -280,21 +254,25 @@ export default function AttendanceScanScreen({ navigation }) {
             // Get first check-in time for status calculation
             const firstCheckIn = new Date(sessions[0].checkIn);
 
+            // Total break minutes across all completed breaks
+            const totalBreakMinutes = getTotalBreakMinutes(todayAttendance.breaks || []);
+
             // Calculate final status based on first check-in and total hours
             const status = calculateAttendanceStatus(firstCheckIn, now, {
                 ...settings,
-                // Override work hours for status calculation
                 workHours: totalWorkHours,
+                totalBreakMinutes,
             });
 
             // Update attendance record
             const updatedAttendance = {
                 ...todayAttendance,
-                companyId: user.companyId, // Ensure companyId is present
+                companyId: user.companyId,
                 checkOut: now.toISOString(),
                 checkOutTime: formatTime(now),
                 sessions: sessions,
                 workHours: parseFloat(totalWorkHours.toFixed(2)),
+                totalBreakMinutes,
                 status: status.status,
                 method: isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'face_scan' : 'geo_location',
                 faceVerified: isFeatureEnabled(FEATURES.FACE_RECOGNITION),
@@ -324,6 +302,102 @@ export default function AttendanceScanScreen({ navigation }) {
         }
     };
 
+    const getActiveSession = () => {
+        const sessions = todayAttendance?.sessions || [];
+        return sessions.find(s => s.checkIn && !s.checkOut) || null;
+    };
+
+    // ── Break helpers ──────────────────────────────────────────────────────────
+    const getActiveBreak = () => {
+        const breaks = todayAttendance?.breaks || [];
+        return breaks.find(b => b.start && !b.end) || null;
+    };
+
+    const getTotalBreakMinutes = (breaks = []) =>
+        breaks.filter(b => b.end).reduce((t, b) => t + (b.durationMinutes || 0), 0);
+
+    const handleBreakStart = async () => {
+        if (breakLoading) return;
+        const settings = officeSettings || getDefaultSettings();
+        if (!settings.breakEnabled) {
+            Alert.alert('Breaks Disabled', 'Break tracking is not enabled by your administrator.');
+            return;
+        }
+        const activeSession = getActiveSession();
+        if (!activeSession) {
+            Alert.alert('Not Checked In', 'You must be checked in to start a break.');
+            return;
+        }
+        if (getActiveBreak()) {
+            Alert.alert('Break Active', 'You already have an active break. End it first.');
+            return;
+        }
+        const breaks = todayAttendance.breaks || [];
+        const completedBreaks = breaks.filter(b => b.end);
+        if (completedBreaks.length >= (settings.maxBreakCount || 2)) {
+            Alert.alert('Break Limit Reached', `Maximum ${settings.maxBreakCount} break(s) allowed per day.`);
+            return;
+        }
+        const totalUsed = getTotalBreakMinutes(breaks);
+        if (totalUsed >= (settings.maxBreakMinutes || 60)) {
+            Alert.alert('Break Limit Reached', `You have used all ${settings.maxBreakMinutes} allowed break minutes.`);
+            return;
+        }
+        try {
+            setBreakLoading(true);
+            const now = new Date();
+            const newBreak = {
+                start: now.toISOString(),
+                startTime: formatTime(now),
+                end: null,
+                endTime: null,
+                durationMinutes: 0,
+                sessionIndex: todayAttendance.sessions.indexOf(activeSession),
+            };
+            const updatedBreaks = [...breaks, newBreak];
+            const updated = { ...todayAttendance, breaks: updatedBreaks, updatedAt: now.toISOString() };
+            await db.collection('attendance').doc(todayAttendance.id).set(updated);
+            setTodayAttendance(updated);
+            Alert.alert('Break Started ☕', `Break started at ${formatTime(now)}`);
+        } catch (e) {
+            Alert.alert('Error', 'Failed to start break.');
+        } finally {
+            setBreakLoading(false);
+        }
+    };
+
+    const handleBreakEnd = async () => {
+        if (breakLoading) return;
+        const activeBreak = getActiveBreak();
+        if (!activeBreak) {
+            Alert.alert('No Active Break', 'No break is currently active.');
+            return;
+        }
+        try {
+            setBreakLoading(true);
+            const now = new Date();
+            const durationMinutes = Math.round((now - new Date(activeBreak.start)) / 60000);
+            const settings = officeSettings || getDefaultSettings();
+            const totalUsedBefore = getTotalBreakMinutes(todayAttendance.breaks || []);
+            const allowed = settings.maxBreakMinutes || 60;
+            const cappedDuration = Math.min(durationMinutes, allowed - totalUsedBefore);
+            const breaks = (todayAttendance.breaks || []).map(b =>
+                b === activeBreak
+                    ? { ...b, end: now.toISOString(), endTime: formatTime(now), durationMinutes: cappedDuration }
+                    : b
+            );
+            const updated = { ...todayAttendance, breaks, updatedAt: now.toISOString() };
+            await db.collection('attendance').doc(todayAttendance.id).set(updated);
+            setTodayAttendance(updated);
+            Alert.alert('Break Ended ✅', `Break duration: ${cappedDuration} min`);
+        } catch (e) {
+            Alert.alert('Error', 'Failed to end break.');
+        } finally {
+            setBreakLoading(false);
+        }
+    };
+    // ── End break helpers ──────────────────────────────────────────────────────
+
     const getStatusInfo = () => {
         if (!todayAttendance) {
             return {
@@ -334,20 +408,23 @@ export default function AttendanceScanScreen({ navigation }) {
             };
         }
 
-        if (todayAttendance.checkOut) {
+        const activeSession = getActiveSession();
+        if (activeSession) {
             return {
-                title: 'Checked Out',
-                subtitle: `Work Hours: ${todayAttendance.workHours.toFixed(1)} hrs`,
-                icon: 'checkmark-circle',
-                color: Colors.success,
+                title: 'Checked In',
+                subtitle: `Session ${todayAttendance.sessions.indexOf(activeSession) + 1} · Since ${activeSession.checkInTime}`,
+                icon: 'time',
+                color: Colors.primary,
             };
         }
 
+        const sessions = todayAttendance.sessions || [];
+        const totalHours = sessions.reduce((t, s) => t + (s.sessionHours || 0), 0);
         return {
-            title: 'Checked In',
-            subtitle: `Since ${todayAttendance.checkInTime}`,
-            icon: 'time',
-            color: Colors.primary,
+            title: `${sessions.length} Session${sessions.length > 1 ? 's' : ''} Completed`,
+            subtitle: `Total: ${totalHours.toFixed(1)} hrs · Tap to start new session`,
+            icon: 'checkmark-circle',
+            color: Colors.success,
         };
     };
 
@@ -383,7 +460,7 @@ export default function AttendanceScanScreen({ navigation }) {
                 <Text style={styles.headerSubtitle}>{isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'Smart Verification Active' : 'Scan to check-in/out'}</Text>
             </LinearGradient>
 
-            <View style={styles.content}>
+            <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
                 {/* Current Status Card */}
                 <View style={styles.statusCard}>
                     <View style={styles.statusIconContainer}>
@@ -452,66 +529,162 @@ export default function AttendanceScanScreen({ navigation }) {
                     </View>
                 )}
 
+                {/* Break Controls — only shown when checked in and breaks are enabled */}
+                {(() => {
+                    const settings = officeSettings || getDefaultSettings();
+                    if (!settings.breakEnabled) return null;
+                    const activeSession = getActiveSession();
+                    if (!activeSession) return null; // only show during active session
+                    const activeBreak = getActiveBreak();
+                    const breaks = todayAttendance?.breaks || [];
+                    const totalUsed = getTotalBreakMinutes(breaks);
+                    const maxMin = settings.maxBreakMinutes || 60;
+                    return (
+                        <View style={styles.breakCard}>
+                            <View style={styles.breakHeader}>
+                                <Ionicons name="cafe-outline" size={18} color="#F39C12" />
+                                <Text style={styles.breakTitle}>Break Management</Text>
+                                <Text style={styles.breakUsed}>{totalUsed}/{maxMin} min used</Text>
+                            </View>
+                            {breaks.filter(b => b.end).map((b, i) => (
+                                <View key={i} style={styles.breakRow}>
+                                    <Text style={styles.breakRowLabel}>Break {i + 1}</Text>
+                                    <Text style={styles.breakRowTime}>{b.startTime} → {b.endTime}</Text>
+                                    <Text style={styles.breakRowDur}>{b.durationMinutes}m</Text>
+                                </View>
+                            ))}
+                            {activeBreak && (
+                                <View style={[styles.breakRow, { backgroundColor: '#FFF3CD' }]}>
+                                    <Ionicons name="time-outline" size={14} color="#F39C12" />
+                                    <Text style={[styles.breakRowTime, { color: '#F39C12', marginLeft: 4 }]}>On break since {activeBreak.startTime}</Text>
+                                </View>
+                            )}
+                            <View style={styles.breakButtons}>
+                                {!activeBreak ? (
+                                    <TouchableOpacity
+                                        style={[styles.breakBtn, { backgroundColor: '#F39C12' }]}
+                                        onPress={handleBreakStart}
+                                        disabled={breakLoading}
+                                    >
+                                        <Ionicons name="cafe" size={16} color="#FFF" />
+                                        <Text style={styles.breakBtnText}>Start Break</Text>
+                                    </TouchableOpacity>
+                                ) : (
+                                    <TouchableOpacity
+                                        style={[styles.breakBtn, { backgroundColor: '#27AE60' }]}
+                                        onPress={handleBreakEnd}
+                                        disabled={breakLoading}
+                                    >
+                                        <Ionicons name="checkmark-circle" size={16} color="#FFF" />
+                                        <Text style={styles.breakBtnText}>End Break</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </View>
+                    );
+                })()}
+
                 {/* Action Buttons */}
                 <View style={styles.actionButtons}>
-                    {!todayAttendance || !todayAttendance.checkIn ? (
-                        <TouchableOpacity
-                            style={styles.checkInButton}
-                            onPress={handleCheckIn}
-                            disabled={loading}
-                            activeOpacity={0.8}
-                        >
-                            <LinearGradient
-                                colors={[Colors.success, Colors.successDark]}
-                                style={styles.buttonGradient}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 0 }}
-                            >
-                                {loading ? (
-                                    <ActivityIndicator color={Colors.textInverse} />
-                                ) : (
-                                    <>
-                                        <Ionicons name="log-in" size={24} color={Colors.textInverse} />
-                                        <Text style={styles.buttonText}>Check-In Now</Text>
-                                    </>
-                                )}
-                            </LinearGradient>
-                        </TouchableOpacity>
-                    ) : !todayAttendance.checkOut ? (
-                        <TouchableOpacity
-                            style={styles.checkOutButton}
-                            onPress={handleCheckOut}
-                            disabled={loading}
-                            activeOpacity={0.8}
-                        >
-                            <LinearGradient
-                                colors={[Colors.error, Colors.errorDark]}
-                                style={styles.buttonGradient}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 0 }}
-                            >
-                                {loading ? (
-                                    <ActivityIndicator color={Colors.textInverse} />
-                                ) : (
-                                    <>
-                                        <Ionicons name="log-out" size={24} color={Colors.textInverse} />
-                                        <Text style={styles.buttonText}>Check-Out Now</Text>
-                                    </>
-                                )}
-                            </LinearGradient>
-                        </TouchableOpacity>
-                    ) : (
-                        <View style={styles.completedCard}>
-                            <Ionicons name="checkmark-circle" size={60} color={Colors.success} />
-                            <Text style={styles.completedText}>Attendance Marked for Today!</Text>
-                            <TouchableOpacity
-                                style={styles.viewHistoryButton}
-                                onPress={() => navigation.navigate('AttendanceHistory')}
-                            >
-                                <Text style={styles.viewHistoryText}>View History</Text>
-                            </TouchableOpacity>
-                        </View>
-                    )}
+                    {(() => {
+                        const activeSession = getActiveSession();
+                        const hasAnySession = todayAttendance?.sessions?.length > 0;
+
+                        if (!hasAnySession) {
+                            // No sessions yet — show Check-In
+                            return (
+                                <TouchableOpacity
+                                    style={styles.checkInButton}
+                                    onPress={handleCheckIn}
+                                    disabled={loading}
+                                    activeOpacity={0.8}
+                                >
+                                    <LinearGradient
+                                        colors={[Colors.success, Colors.successDark]}
+                                        style={styles.buttonGradient}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 0 }}
+                                    >
+                                        {loading ? <ActivityIndicator color={Colors.textInverse} /> : (
+                                            <>
+                                                <Ionicons name="log-in" size={24} color={Colors.textInverse} />
+                                                <Text style={styles.buttonText}>Check-In Now</Text>
+                                            </>
+                                        )}
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                            );
+                        }
+
+                        if (activeSession) {
+                            // Active session — show Check-Out
+                            return (
+                                <TouchableOpacity
+                                    style={styles.checkOutButton}
+                                    onPress={handleCheckOut}
+                                    disabled={loading}
+                                    activeOpacity={0.8}
+                                >
+                                    <LinearGradient
+                                        colors={[Colors.error, Colors.errorDark]}
+                                        style={styles.buttonGradient}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 0 }}
+                                    >
+                                        {loading ? <ActivityIndicator color={Colors.textInverse} /> : (
+                                            <>
+                                                <Ionicons name="log-out" size={24} color={Colors.textInverse} />
+                                                <Text style={styles.buttonText}>Check-Out Now</Text>
+                                            </>
+                                        )}
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                            );
+                        }
+
+                        // All sessions closed — show session summary + new session button
+                        return (
+                            <View style={styles.completedCard}>
+                                <Ionicons name="checkmark-circle" size={48} color={Colors.success} />
+                                <Text style={styles.completedText}>
+                                    {todayAttendance.sessions.length} Session{todayAttendance.sessions.length > 1 ? 's' : ''} · {todayAttendance.workHours?.toFixed(1)} hrs
+                                </Text>
+                                {todayAttendance.sessions.map((s, i) => (
+                                    <View key={i} style={styles.sessionRow}>
+                                        <Text style={styles.sessionLabel}>Session {i + 1}</Text>
+                                        <Text style={styles.sessionTime}>{s.checkInTime} → {s.checkOutTime || '--'}</Text>
+                                        <Text style={styles.sessionHours}>{s.sessionHours?.toFixed(1)}h</Text>
+                                    </View>
+                                ))}
+                                <TouchableOpacity
+                                    style={styles.newSessionButton}
+                                    onPress={handleCheckIn}
+                                    disabled={loading}
+                                    activeOpacity={0.8}
+                                >
+                                    <LinearGradient
+                                        colors={[Colors.success, Colors.successDark]}
+                                        style={styles.buttonGradient}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 0 }}
+                                    >
+                                        {loading ? <ActivityIndicator color={Colors.textInverse} /> : (
+                                            <>
+                                                <Ionicons name="add-circle" size={24} color={Colors.textInverse} />
+                                                <Text style={styles.buttonText}>Start New Session</Text>
+                                            </>
+                                        )}
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.viewHistoryButton}
+                                    onPress={() => navigation.navigate('AttendanceHistory')}
+                                >
+                                    <Text style={styles.viewHistoryText}>View History</Text>
+                                </TouchableOpacity>
+                            </View>
+                        );
+                    })()}
                 </View>
 
                 {/* Info Card */}
@@ -524,7 +697,7 @@ export default function AttendanceScanScreen({ navigation }) {
                         }
                     </Text>
                 </View>
-            </View>
+            </ScrollView>
         </View>
     );
 }
@@ -573,7 +746,10 @@ const styles = StyleSheet.create({
     },
     content: {
         flex: 1,
+    },
+    contentInner: {
         padding: 20,
+        paddingBottom: 40,
     },
     statusCard: {
         backgroundColor: Colors.surface,
@@ -694,23 +870,62 @@ const styles = StyleSheet.create({
         ...shadows.small,
     },
     completedText: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: Colors.text,
-        marginTop: 16,
-        marginBottom: 20,
-        textAlign: 'center',
-    },
-    viewHistoryButton: {
-        backgroundColor: Colors.primary,
-        paddingHorizontal: 24,
-        paddingVertical: 12,
-        borderRadius: 12,
-    },
-    viewHistoryText: {
         fontSize: 16,
         fontWeight: '600',
-        color: Colors.textInverse,
+        color: Colors.text,
+        marginTop: 12,
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    sessionRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        width: '100%',
+        paddingVertical: 6,
+        paddingHorizontal: 8,
+        backgroundColor: Colors.background,
+        borderRadius: 8,
+        marginBottom: 4,
+    },
+    sessionLabel: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: Colors.textSecondary,
+        width: 70,
+    },
+    sessionTime: {
+        fontSize: 13,
+        color: Colors.text,
+        flex: 1,
+        textAlign: 'center',
+    },
+    sessionHours: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: Colors.primary,
+        width: 35,
+        textAlign: 'right',
+    },
+    newSessionButton: {
+        borderRadius: 16,
+        overflow: 'hidden',
+        width: '100%',
+        marginTop: 12,
+        marginBottom: 8,
+    },
+    viewHistoryButton: {
+        paddingHorizontal: 24,
+        paddingVertical: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: Colors.primary,
+        marginTop: 4,
+    },
+    viewHistoryText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: Colors.primary,
     },
     infoCard: {
         flexDirection: 'row',
@@ -726,5 +941,72 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: Colors.textSecondary,
         lineHeight: 20,
+    },
+    breakCard: {
+        backgroundColor: Colors.surface,
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        borderLeftWidth: 4,
+        borderLeftColor: '#F39C12',
+        ...shadows.small,
+    },
+    breakHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 10,
+        gap: 8,
+    },
+    breakTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: Colors.text,
+        flex: 1,
+    },
+    breakUsed: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#F39C12',
+    },
+    breakRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 5,
+        paddingHorizontal: 8,
+        backgroundColor: Colors.background,
+        borderRadius: 8,
+        marginBottom: 4,
+    },
+    breakRowLabel: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: Colors.textSecondary,
+        width: 55,
+    },
+    breakRowTime: {
+        fontSize: 12,
+        color: Colors.text,
+        flex: 1,
+    },
+    breakRowDur: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#F39C12',
+    },
+    breakButtons: {
+        marginTop: 10,
+    },
+    breakBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        borderRadius: 10,
+        gap: 8,
+    },
+    breakBtnText: {
+        color: '#FFF',
+        fontWeight: '700',
+        fontSize: 14,
     },
 });
