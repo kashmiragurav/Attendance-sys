@@ -400,8 +400,46 @@ export const auth = {
   signOut: () => Promise.resolve(),
 };
 
+const STORAGE_BASE_URL = `https://firebasestorage.googleapis.com/v0/b/${PROJECT_ID}.appspot.com/o`;
+
 export const storage = {
-  ref: () => ({}),
+  /**
+   * Upload a base64 JPEG to Firebase Storage.
+   * @param {string} storagePath - e.g. "attendance_photos/comp_1/user_1/2025-01-01/0_check-in.jpg"
+   * @param {string} base64 - raw base64 string (no data URI prefix)
+   * @returns {Promise<{ok: boolean, url?: string, error?: string}>}
+   */
+  uploadBase64: async (storagePath, base64) => {
+    try {
+      const encodedPath = encodeURIComponent(storagePath);
+
+      // Convert base64 to binary
+      const binaryStr = atob(base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const uploadRes = await fetch(
+        `${STORAGE_BASE_URL}?uploadType=media&name=${encodedPath}&key=${API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'image/jpeg' },
+          body: bytes,
+        }
+      );
+
+      if (!uploadRes.ok) {
+        const text = await uploadRes.text();
+        return { ok: false, error: `Upload failed: HTTP ${uploadRes.status} — ${text}` };
+      }
+
+      const url = `${STORAGE_BASE_URL}/${encodedPath}?alt=media&key=${API_KEY}`;
+      return { ok: true, url };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  },
 };
 
 console.log('✅ Firestore REST API initialized for attendance-3519f');

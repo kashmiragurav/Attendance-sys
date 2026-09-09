@@ -11,11 +11,14 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebaseConfig';
 import { formatDate, formatTime, calculateAttendanceStatus, isAttendanceMarkedToday } from '../utils/attendance';
 import { resolveConfig } from '../utils/attendanceConfig';
 import { checkAttendanceLocation } from '../utils/locationValidator';
+import { uploadAttendancePhoto } from '../utils/photoUpload';
 import { validateWifi } from '../utils/wifiValidator';
 import Colors, { gradients, shadows } from '../constants/Colors';
 
@@ -76,6 +79,38 @@ export default function AttendanceScanScreen({ navigation }) {
         return true;
     };
 
+    /**
+     * Silently capture a photo using the device camera.
+     * Returns base64 string or null if the user declines / capture fails.
+     * Never blocks attendance — always resolves.
+     */
+    const captureAttendancePhoto = async () => {
+        try {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') return null;
+
+            const result = await ImagePicker.launchCameraAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: false,
+                quality: 0.5,
+                base64: false,
+            });
+
+            if (result.canceled || !result.assets?.[0]?.uri) return null;
+
+            const manipulated = await manipulateAsync(
+                result.assets[0].uri,
+                [{ resize: { width: 500 } }],
+                { compress: 0.7, format: SaveFormat.JPEG, base64: true }
+            );
+
+            return manipulated.base64 || null;
+        } catch (err) {
+            console.warn('[AttendanceScan] Photo capture failed:', err.message);
+            return null;
+        }
+    };
+
     const handleCheckIn = async () => {
         if (isFeatureEnabled(FEATURES.FACE_RECOGNITION)) {
             navigation.navigate('RealTimeFaceScan', {
@@ -114,6 +149,23 @@ export default function AttendanceScanScreen({ navigation }) {
                 return;
             }
 
+            // Capture photo non-blocking — attendance proceeds even if photo is skipped/fails
+            const base64 = await captureAttendancePhoto();
+            const sessionIndex = sessions.length; // index of the session being created
+            let photoUrl = null;
+            if (base64) {
+                const photoResult = await uploadAttendancePhoto({
+                    companyId: user.companyId,
+                    userId: user.uid,
+                    date: today,
+                    sessionIndex,
+                    action: 'check-in',
+                    base64,
+                });
+                if (!photoResult.ok) console.warn('[Photo] Upload failed:', photoResult.error);
+                else photoUrl = photoResult.url;
+            }
+
             let attendanceData;
             let attendanceId;
 
@@ -132,6 +184,7 @@ export default function AttendanceScanScreen({ navigation }) {
                     checkOutTime: null,
                     sessionHours: 0,
                     location: locationData,
+                    checkInPhotoUrl: photoUrl,
                 };
 
                 sessions.push(newSession);
@@ -181,6 +234,7 @@ export default function AttendanceScanScreen({ navigation }) {
                         checkOutTime: null,
                         sessionHours: 0,
                         location: locationData,
+                        checkInPhotoUrl: photoUrl,
                     }],
                     isLate: status.isLate,
                     lateMinutes: status.lateMinutes || 0,
@@ -250,7 +304,24 @@ export default function AttendanceScanScreen({ navigation }) {
             }
 
             const now = new Date();
+            const today = formatDate(now);
             const settings = officeSettings || getDefaultSettings();
+
+            // Capture photo non-blocking
+            const base64 = await captureAttendancePhoto();
+            let photoUrl = null;
+            if (base64) {
+                const photoResult = await uploadAttendancePhoto({
+                    companyId: user.companyId,
+                    userId: user.uid,
+                    date: today,
+                    sessionIndex: currentSessionIndex,
+                    action: 'check-out',
+                    base64,
+                });
+                if (!photoResult.ok) console.warn('[Photo] Upload failed:', photoResult.error);
+                else photoUrl = photoResult.url;
+            }
 
             // Update current session with check-out
             const currentSession = sessions[currentSessionIndex];
@@ -263,6 +334,7 @@ export default function AttendanceScanScreen({ navigation }) {
                 checkOutTime: formatTime(now),
                 sessionHours: parseFloat(sessionHours.toFixed(2)),
                 checkoutLocation: locationData,
+                checkOutPhotoUrl: photoUrl,
             };
 
             // Calculate total work hours from all sessions
