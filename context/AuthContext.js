@@ -404,7 +404,6 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       setError(null);
-      setLoading(true);
       await AsyncStorage.removeItem('userToken');
       setUser(null);
       setCompany(null);
@@ -413,8 +412,6 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       setError(err.message);
       return { success: false, error: err.message };
-    } finally {
-      setLoading(false);
     }
   };
 

@@ -130,25 +130,27 @@ export default function FaceRegistrationScreen({ navigation }) {
             setLoading(true);
             const straightImage = images.find(img => img.gesture === 'look_straight');
 
-            // 1. Call backend to extract embedding
             const apiResult = await faceApiService.registerFace(
                 user.uid,
                 user.companyId,
                 straightImage.base64
             );
 
-            if (apiResult.success) {
-                // 2. Update local state via AuthContext
-                await updateFaceEmbedding('registered'); // Logic inside AuthContext will be updated
-                setStep(3);
-                setTimeout(() => navigation.goBack(), 2000);
-            } else {
-                Alert.alert('Registration Failed', apiResult.error);
+            if (!apiResult.success) {
+                Alert.alert('Registration Failed', apiResult.error || 'Could not register face. Please try again.');
                 handleReset();
+                return;
             }
+
+            // faceRegistered is true only when the backend stored a real embedding.
+            // When simulated, we still mark it so the UI flow works, but the record
+            // carries faceVerified: false on each attendance scan until the backend is live.
+            await updateFaceEmbedding('registered');
+            setStep(3);
+            setTimeout(() => navigation.goBack(), 2000);
         } catch (error) {
             console.error('Finalize error:', error);
-            Alert.alert('Error', 'Failed to save face registration');
+            Alert.alert('Error', 'Failed to save face registration. Please try again.');
             handleReset();
         } finally {
             setLoading(false);
