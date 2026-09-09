@@ -16,10 +16,11 @@ import { db } from '../services/firebaseConfig';
 import { formatDate, formatTime, calculateAttendanceStatus, isAttendanceMarkedToday } from '../utils/attendance';
 import { resolveConfig } from '../utils/attendanceConfig';
 import { checkAttendanceLocation } from '../utils/locationValidator';
+import { validateWifi } from '../utils/wifiValidator';
 import Colors, { gradients, shadows } from '../constants/Colors';
 
 export default function AttendanceScanScreen({ navigation }) {
-    const { user, isFeatureEnabled, FEATURES } = useAuth();
+    const { user, isFeatureEnabled, FEATURES, company } = useAuth();
     const [loading, setLoading] = useState(false);
     const [todayAttendance, setTodayAttendance] = useState(null);
     const [officeSettings, setOfficeSettings] = useState(null);
@@ -61,6 +62,20 @@ export default function AttendanceScanScreen({ navigation }) {
 
     const getDefaultSettings = () => resolveConfig(null);
 
+    const checkWifiIfRequired = async () => {
+        if (!company?.wifiRestrictionEnabled) return true;
+        const result = await validateWifi(company.allowedWifis || []);
+        if (result.failOpen) {
+            console.warn('[AttendanceScan] WiFi fail-open:', result.code);
+            return true;
+        }
+        if (!result.allowed) {
+            Alert.alert('WiFi Validation Failed', result.reason);
+            return false;
+        }
+        return true;
+    };
+
     const handleCheckIn = async () => {
         if (isFeatureEnabled(FEATURES.FACE_RECOGNITION)) {
             navigation.navigate('RealTimeFaceScan', {
@@ -69,6 +84,8 @@ export default function AttendanceScanScreen({ navigation }) {
             });
         } else {
             setLoading(true);
+            const wifiOk = await checkWifiIfRequired();
+            if (!wifiOk) { setLoading(false); return; }
             const settings = officeSettings || getDefaultSettings();
             const locResult = await checkAttendanceLocation(settings);
             setLoading(false);
@@ -206,6 +223,8 @@ export default function AttendanceScanScreen({ navigation }) {
             });
         } else {
             setLoading(true);
+            const wifiOk = await checkWifiIfRequired();
+            if (!wifiOk) { setLoading(false); return; }
             const settings = officeSettings || getDefaultSettings();
             const locResult = await checkAttendanceLocation(settings);
             setLoading(false);

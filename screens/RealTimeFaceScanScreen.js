@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -25,6 +24,7 @@ import { getDetailedAddress } from '../services/googleMapsService'; // Assuming 
 import { calculateAttendanceStatus, formatDate, formatTime } from '../utils/attendance';
 import { resolveConfig } from '../utils/attendanceConfig';
 import { acquireLocation, validateGeoFence } from '../utils/locationValidator';
+import { validateWifi } from '../utils/wifiValidator';
 import { faceDetectorSettings, isNativeDetectorAvailable } from '../utils/faceRecognition';
 
 export default function RealTimeFaceScanScreen({ navigation, route }) {
@@ -180,56 +180,21 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
     const checkWifi = async () => {
         if (!company?.wifiRestrictionEnabled) return true;
 
-        try {
-            const state = await NetInfo.fetch();
+        const allowedNetworks = company.allowedWifis || [];
+        const result = await validateWifi(allowedNetworks);
 
-            // 1. Check if connected to WiFi
-            if (state.type !== 'wifi') {
-                Alert.alert(
-                    'WiFi Required',
-                    'You must be connected to an approved WiFi network to mark attendance.',
-                    [{ text: 'OK' }]
-                );
-                return false;
-            }
-
-            // 2. Strict SSID Check (If allowed list exists)
-            const allowedWifis = company.allowedWifis || [];
-            if (allowedWifis.length > 0) {
-                let currentSSID = state.details?.ssid;
-
-                // Handle Android specific quotes or null
-                if (currentSSID) {
-                    currentSSID = currentSSID.replace(/^"(.*)"$/, '$1');
-                }
-
-                // If SSID cannot be read (common on modern Android without location permission/service)
-                if (!currentSSID || currentSSID === '<unknown ssid>') {
-                    // FAIL OPEN: We allow it because blocking valid users due to OS restrictions is bad UX.
-                    console.log('⚠️ Could not verify SSID, but connected to WiFi. Allowing.');
-                    return true;
-                }
-
-                const isAllowed = allowedWifis.some(wifi =>
-                    wifi.trim().toLowerCase() === currentSSID.trim().toLowerCase()
-                );
-
-                if (!isAllowed) {
-                    Alert.alert(
-                        'Wrong WiFi Network',
-                        `You are connected to "${currentSSID}".\nPlease connect to one of the authorized office networks.`,
-                        [{ text: 'OK' }]
-                    );
-                    return false;
-                }
-            }
-
-            return true;
-        } catch (e) {
-            console.log('WiFi Check Warning (Suppressed):', e.message);
-            // FAIL OPEN if crash
+        if (result.failOpen) {
+            // OS prevented SSID/BSSID reading — logged, attendance allowed
+            console.warn('[checkWifi] Fail-open:', result.code, result.reason);
             return true;
         }
+
+        if (!result.allowed) {
+            Alert.alert('WiFi Validation Failed', result.reason, [{ text: 'OK' }]);
+            return false;
+        }
+
+        return true;
     };
 
     const handleCapture = async () => {
