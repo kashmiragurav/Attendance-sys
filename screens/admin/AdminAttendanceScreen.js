@@ -34,6 +34,10 @@ export default function AdminAttendanceScreen({ navigation }) {
         return unsubscribe;
     }, [navigation, selectedDate, refreshCompany]);
 
+    useEffect(() => {
+        loadAttendance();
+    }, [selectedDate]);
+
     const loadAttendance = async () => {
         try {
             setLoading(true);

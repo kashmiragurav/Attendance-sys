@@ -23,8 +23,11 @@ export default function AdminEmployeesScreen({ navigation }) {
     const { user, getUserLimit, FEATURES } = useAuth();
 
     useEffect(() => {
-        loadEmployees();
-    }, []);
+        const unsubscribe = navigation.addListener('focus', () => {
+            loadEmployees();
+        });
+        return unsubscribe;
+    }, [navigation]);
 
     const loadEmployees = async () => {
         try {
@@ -271,15 +274,18 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#2C3E50',
         marginBottom: 2,
+        flexShrink: 1,
     },
     empId: {
         fontSize: 13,
         color: '#7F8C8D',
         marginBottom: 8,
+        flexShrink: 1,
     },
     tagRow: {
         flexDirection: 'row',
-        gap: 8,
+        flexWrap: 'wrap',
+        gap: 6,
     },
     tag: {
         backgroundColor: '#F0F4C3',
@@ -291,6 +297,7 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#827717',
         fontWeight: '600',
+        flexShrink: 1,
     },
     loadingContainer: {
         flex: 1,

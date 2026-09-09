@@ -19,8 +19,11 @@ export default function AdminLogsScreen({ navigation }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        loadLogs();
-    }, []);
+        const unsubscribe = navigation.addListener('focus', () => {
+            loadLogs();
+        });
+        return unsubscribe;
+    }, [navigation]);
 
     const loadLogs = async () => {
         try {
