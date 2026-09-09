@@ -23,6 +23,7 @@ import { faceApiService } from '../services/faceApiService';
 import { db } from '../services/firebaseConfig';
 import { getDetailedAddress } from '../services/googleMapsService'; // Assuming this import existed
 import { calculateAttendanceStatus, formatDate, formatTime } from '../utils/attendance';
+import { resolveConfig } from '../utils/attendanceConfig';
 import { faceDetectorSettings, isNativeDetectorAvailable } from '../utils/faceRecognition';
 
 export default function RealTimeFaceScanScreen({ navigation, route }) {
@@ -75,7 +76,9 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
         try {
             const doc = await db.collection('office_settings').doc('settings_default').get();
             if (doc.exists) {
-                setOfficeSettings(doc.data());
+                setOfficeSettings(resolveConfig(doc.data()));
+            } else {
+                setOfficeSettings(resolveConfig(null));
             }
         } catch (error) {
             console.error('Error loading settings:', error);
@@ -395,11 +398,7 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
             if (action === 'check-in') {
                 // Check-in logic
                 const attendanceId = todayRecord ? todayRecord.id : `att_${user.uid}_${today}`;
-                const settings = {
-                    officeStartTime: '09:30',
-                    gracePeriodMinutes: 10,
-                    fullDayHours: 9,
-                };
+                const settings = resolveConfig(officeSettings);
 
                 const status = calculateAttendanceStatus(now, null, settings);
 
@@ -480,9 +479,7 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
 
                 const firstCheckIn = new Date(sessions[0].checkIn);
                 const status = calculateAttendanceStatus(firstCheckIn, now, {
-                    officeStartTime: '09:30',
-                    gracePeriodMinutes: 10,
-                    fullDayHours: 9,
+                    ...resolveConfig(officeSettings),
                     workHours: totalWorkHours,
                 });
 

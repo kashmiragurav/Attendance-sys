@@ -31,6 +31,8 @@ import AdminEmployeeLocationHistoryScreen from './screens/admin/AdminEmployeeLoc
 import AdminEmployeesScreen from './screens/admin/AdminEmployeesScreen';
 import AdminLocationMapScreen from './screens/admin/AdminLocationMapScreen';
 import AdminLogsScreen from './screens/admin/AdminLogsScreen';
+import AdminWorkReportScreen from './screens/admin/AdminWorkReportScreen';
+import SuperAdminAttendanceConfigScreen from './screens/admin/SuperAdminAttendanceConfigScreen';
 import SuperAdminCompanyDetailsScreen from './screens/admin/SuperAdminCompanyDetailsScreen';
 import SuperAdminDashboardScreen from './screens/admin/SuperAdminDashboardScreen';
 
@@ -60,6 +62,7 @@ function SuperAdminStack() {
     >
       <Stack.Screen name="SuperAdminDashboard" component={SuperAdminDashboardScreen} />
       <Stack.Screen name="SuperAdminCompanyDetails" component={SuperAdminCompanyDetailsScreen} />
+      <Stack.Screen name="SuperAdminAttendanceConfig" component={SuperAdminAttendanceConfigScreen} />
     </Stack.Navigator>
   );
 }
@@ -82,6 +85,7 @@ function AdminStack() {
       <Stack.Screen name="AdminEmployeeHistory" component={AdminEmployeeHistoryScreen} />
       <Stack.Screen name="AdminEmployeeLocationHistory" component={AdminEmployeeLocationHistoryScreen} />
       <Stack.Screen name="AdminEditAttendance" component={AdminEditAttendanceScreen} />
+      <Stack.Screen name="AdminWorkReport" component={AdminWorkReportScreen} />
       <Stack.Screen name="EmploymentDetails" component={EmploymentDetailsScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
     </Stack.Navigator>

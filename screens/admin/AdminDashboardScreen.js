@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     RefreshControl,
     ScrollView,
     StatusBar,
@@ -28,8 +29,11 @@ export default function AdminDashboardScreen({ navigation }) {
     const [refreshing, setRefreshing] = useState(false);
 
     useEffect(() => {
-        loadDashboardData();
-    }, []);
+        const unsubscribe = navigation.addListener('focus', () => {
+            loadDashboardData();
+        });
+        return unsubscribe;
+    }, [navigation]);
 
     const loadDashboardData = async () => {
         try {
@@ -122,8 +126,19 @@ export default function AdminDashboardScreen({ navigation }) {
         setRefreshing(false);
     };
 
-    const handleLogout = async () => {
-        await logout();
+    const handleLogout = () => {
+        Alert.alert(
+            'Confirm Logout',
+            'Are you sure you want to logout?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Confirm Logout',
+                    style: 'destructive',
+                    onPress: async () => { await logout(); }
+                }
+            ]
+        );
     };
 
     if (loading && !refreshing) {
@@ -163,7 +178,7 @@ export default function AdminDashboardScreen({ navigation }) {
                             <Ionicons name="people" size={24} color="#4A90E2" />
                         </View>
                         <Text style={styles.mainStatValue}>{stats.totalEmployees}</Text>
-                        <Text style={styles.mainStatLabel}>All Staff</Text>
+                        <Text style={styles.mainStatLabel}>All Employee</Text>
                     </View>
                     <View style={styles.miniStatsCol}>
                         <View style={[styles.miniStatCard, { backgroundColor: '#F0FFF4' }]}>
@@ -241,11 +256,17 @@ export default function AdminDashboardScreen({ navigation }) {
                         color="#9B59B6"
                         onPress={() => navigation.navigate('AdminLocationMap')}
                     />
+                    <ActionButton
+                        icon="bar-chart-outline"
+                        title="Work Report"
+                        color="#e17055"
+                        onPress={() => navigation.navigate('AdminWorkReport')}
+                    />
                     <FeatureGate feature={FEATURES.ADVANCED_REPORTS}>
                         <ActionButton
                             icon="document-text-outline"
                             title="Advanced Reports"
-                            color="#e17055"
+                            color="#6C5CE7"
                             onPress={() => navigation.navigate('AdminAdvancedSearch')}
                         />
                     </FeatureGate>
@@ -279,7 +300,7 @@ export default function AdminDashboardScreen({ navigation }) {
 
                 <View style={{ height: 100 }} />
             </ScrollView>
-        </View >
+        </View>
     );
 }
 
@@ -347,12 +368,13 @@ const styles = StyleSheet.create({
         padding: 10,
         backgroundColor: '#F2F2F7',
         borderRadius: 14,
+        alignSelf: 'center',
     },
     statsRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         marginTop: 5,
-        height: 120, // Reduced height for better visibility
+        height: 120,
     },
     mainStatCard: {
         backgroundColor: '#F2F2F7',
@@ -463,6 +485,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '700',
         color: '#1C1C1E',
+        textAlign: 'center',
     },
     badge: {
         position: 'absolute',

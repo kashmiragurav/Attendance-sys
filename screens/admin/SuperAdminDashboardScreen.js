@@ -179,13 +179,22 @@ export default function SuperAdminDashboardScreen({ navigation }) {
             <View style={styles.content}>
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Tenants List</Text>
-                    <TouchableOpacity
-                        style={styles.addBtn}
-                        onPress={() => setIsModalVisible(true)}
-                    >
-                        <Ionicons name="add" size={20} color="#FFF" />
-                        <Text style={styles.addBtnText}>Create Tenant</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <TouchableOpacity
+                            style={[styles.addBtn, { backgroundColor: '#E67E22' }]}
+                            onPress={() => navigation.navigate('SuperAdminAttendanceConfig')}
+                        >
+                            <Ionicons name="settings-outline" size={18} color="#FFF" />
+                            <Text style={styles.addBtnText}>Attendance Config</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.addBtn}
+                            onPress={() => setIsModalVisible(true)}
+                        >
+                            <Ionicons name="add" size={20} color="#FFF" />
+                            <Text style={styles.addBtnText}>Create Tenant</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 {loading && !refreshing ? (
