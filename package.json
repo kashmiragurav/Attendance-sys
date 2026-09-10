@@ -29,6 +29,7 @@
     "@react-navigation/native-stack": "^7.3.16",
     "@vladmandic/face-api": "^1.7.15",
     "expo": "~54.0.31",
+    "firebase": "^10.9.0",
     "expo-application": "~7.0.8",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",

@@ -1,21 +1,3 @@
-# Firebase Security Architecture
-# Project: attendance-3519f
-#
-# The app is moving to Firebase Authentication, but legacy custom-token logic remains
-# temporarily for compatibility. Firestore must not be public.
-#
-# Deploy the rules below in Firebase Console > Firestore Database > Rules.
-# These rules are strict and are designed to block unauthorized access.
-#
-# IMPORTANT:
-# - Firebase Auth must be enabled in the Firebase Console.
-# - The user document ID should match the Firebase Auth UID.
-# - Employees must not be able to read or write records for other users.
-# - Admins can only access company-scoped data.
-# - Super Admin can access organization-level settings.
-#
-# Example rules:
-
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -51,21 +33,24 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isSignedIn() && (
         isOwnUser(userId) ||
-        isCompanyAdmin() && sameCompany(resource.data.companyId) ||
+        (isCompanyAdmin() && sameCompany(resource.data.companyId)) ||
         isSuperAdmin()
       );
 
       allow create: if isSignedIn() && isOwnUser(userId);
+
       allow update: if isSignedIn() && (
-        isOwnUser(userId) && request.resource.data.role == resource.data.role
-      ) || isSuperAdmin();
+        (isOwnUser(userId) && request.resource.data.role == resource.data.role) ||
+        isSuperAdmin()
+      );
+
       allow delete: if false;
     }
 
     match /attendance/{attendanceId} {
       allow read: if isSignedIn() && (
         resource.data.userId == request.auth.uid ||
-        isCompanyAdmin() && sameCompany(resource.data.companyId) ||
+        (isCompanyAdmin() && sameCompany(resource.data.companyId)) ||
         isSuperAdmin()
       );
 
@@ -74,19 +59,41 @@ service cloud.firestore {
         request.resource.data.companyId == getUserData().companyId;
 
       allow update: if isSignedIn() && (
-        resource.data.userId == request.auth.uid &&
-        resource.data.companyId == getUserData().companyId
-      ) || (
-        isCompanyAdmin() && sameCompany(resource.data.companyId)
-      ) || isSuperAdmin();
+        (resource.data.userId == request.auth.uid &&
+         resource.data.companyId == getUserData().companyId) ||
+        (isCompanyAdmin() && sameCompany(resource.data.companyId)) ||
+        isSuperAdmin()
+      );
 
+      allow delete: if false;
+    }
+
+    match /attendanceEvents/{eventId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        (isCompanyAdmin() && sameCompany(resource.data.companyId)) ||
+        isSuperAdmin()
+      );
+
+      allow create: if isSignedIn() &&
+        request.resource.data.eventId == eventId &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.companyId == getUserData().companyId &&
+        request.resource.data.employeeId == getUserData().employeeId &&
+        request.resource.data.type in ['IN', 'OUT'] &&
+        request.resource.data.date is string &&
+        request.resource.data.timestamp is timestamp;
+
+      allow update: if false;
       allow delete: if false;
     }
 
     match /companies/{companyId} {
       allow read: if isSignedIn() && (
-        getUserData().companyId == companyId || isSuperAdmin()
+        getUserData().companyId == companyId ||
+        isSuperAdmin()
       );
+
       allow write: if isSuperAdmin();
     }
 
