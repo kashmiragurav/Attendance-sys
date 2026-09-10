@@ -293,7 +293,7 @@ export const db = {
         return { docs: filtered };
       } catch (error) {
         console.error('❌ Error querying documents:', error);
-        return { docs: [] };
+        return { docs: [], error: error.message };
       }
     },
   }),

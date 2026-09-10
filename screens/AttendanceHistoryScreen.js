@@ -63,6 +63,7 @@ export default function AttendanceHistoryScreen({ navigation }) {
             generateMarkedDates(userRecords);
         } catch (error) {
             console.error('Error loading attendance history:', error);
+            Alert.alert('Load Failed', 'Could not load attendance history. Please check your connection and try again.');
         } finally {
             setLoading(false);
         }
@@ -80,8 +81,8 @@ export default function AttendanceHistoryScreen({ navigation }) {
         });
 
         // 2. Calculate actual counts from records
-        let present = monthRecords.filter(r => r.status === 'present').length;
-        let halfDay = monthRecords.filter(r => r.status === 'half_day' || r.status === 'late').length;
+        let present = monthRecords.filter(r => r.status === 'present' || r.status === 'late').length;
+        let halfDay = monthRecords.filter(r => r.status === 'half_day').length;
         let manualAbsent = monthRecords.filter(r => r.status === 'absent').length;
         let paidLeaves = monthRecords.filter(r => r.status === 'paid_leave').length;
 

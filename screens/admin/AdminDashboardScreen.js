@@ -56,8 +56,9 @@ export default function AdminDashboardScreen({ navigation }) {
             let present = 0, late = 0;
             allAttendance.forEach(record => {
                 if (record.date === today) {
-                    if (record.status === 'present') present++;
-                    else if (record.status === 'late' || record.status === 'half_day') late++;
+                    if (record.status === 'present' || record.status === 'late') present++;
+                    if (record.status === 'late') late++;
+                    else if (record.status === 'half_day') late++;
                 }
             });
 
@@ -103,6 +104,7 @@ export default function AdminDashboardScreen({ navigation }) {
 
         } catch (error) {
             console.error('Error loading admin stats:', error);
+            Alert.alert('Connection Error', 'Could not load dashboard data. Pull down to refresh.');
         } finally {
             setLoading(false);
         }

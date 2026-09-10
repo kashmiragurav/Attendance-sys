@@ -84,6 +84,7 @@ export default function AdminAttendanceScreen({ navigation }) {
             setFilteredData(mergedRecords);
         } catch (error) {
             console.error('Error loading attendance:', error);
+            Alert.alert('Connection Error', 'Could not load attendance records. Please check your connection and try again.');
         } finally {
             setLoading(false);
         }

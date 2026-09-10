@@ -51,6 +51,7 @@ export default function AttendanceScanScreen({ navigation, route }) {
             }
         } catch (error) {
             console.error('Error loading data:', error);
+            Alert.alert('Connection Error', 'Could not load attendance data. Please check your connection and try again.');
         } finally {
             setLoading(false);
         }

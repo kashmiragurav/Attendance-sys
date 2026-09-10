@@ -29,9 +29,7 @@ export default function AdminWorkReportScreen({ navigation }) {
     ];
 
     useEffect(() => {
-        const unsubscribe = navigation.addListener('focus', () => {
-            loadReport();
-        });
+        const unsubscribe = navigation.addListener('focus', loadReport);
         return unsubscribe;
     }, [navigation, selectedDate]);
 
@@ -63,7 +61,7 @@ export default function AdminWorkReportScreen({ navigation }) {
                     a => a.userId === emp.uid && a.date && a.date.startsWith(monthPrefix)
                 );
 
-                const present = empRecords.filter(a => a.status === 'present').length;
+                const present = empRecords.filter(a => a.status === 'present' || a.status === 'late').length;
                 const late = empRecords.filter(a => a.status === 'late').length;
                 const halfDay = empRecords.filter(a => a.status === 'half_day').length;
                 const absent = empRecords.filter(a => a.status === 'absent').length;
@@ -91,6 +89,7 @@ export default function AdminWorkReportScreen({ navigation }) {
             setFilteredData(data);
         } catch (error) {
             console.error('Error loading work report:', error);
+            Alert.alert('Load Failed', 'Could not load work report. Please check your connection and try again.');
         } finally {
             setLoading(false);
         }
