@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Dimensions,
   ScrollView,
@@ -24,12 +24,6 @@ export default function DashboardScreen({ navigation }) {
   const { user, isFeatureEnabled, FEATURES, refreshCompany } = useAuth();
   const [todayAttendance, setTodayAttendance] = useState(null);
   const [isWFH, setIsWFH] = useState(false);
-
-  useEffect(() => {
-    loadTodayAttendance();
-    // Refresh company data (permissions) on mount
-    if (refreshCompany) refreshCompany();
-  }, []);
 
   useFocusEffect(
     useCallback(() => {

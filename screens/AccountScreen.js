@@ -38,42 +38,29 @@ export default function AccountScreen({ navigation }) {
             title: 'Work Report',
             icon: 'document-text-outline',
             iconColor: '#4A90E2',
-            screen: null,
-        },
-        {
-            id: 'logout',
-            title: 'Logout',
-            icon: 'log-out-outline',
-            iconColor: '#FF3B30',
-            screen: null,
+            screen: 'AttendanceHistory',
         },
     ];
 
     const handleMenuPress = (item) => {
-        if (item.id === 'logout') {
-            Alert.alert(
-                'Logout',
-                'Are you sure you want to logout?',
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                        text: 'Logout',
-                        style: 'destructive',
-                        onPress: async () => {
-                            await logout();
-                        },
-                    },
-                ]
-            );
-            return;
-        }
-
         if (item.screen) {
             navigation.navigate(item.screen);
-        } else {
-            // Coming soon alert
-            alert('Coming Soon', `${item.title} feature will be available soon`);
         }
+    };
+
+    const handleLogout = () => {
+        Alert.alert(
+            'Are you sure you want to logout?',
+            '',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Logout',
+                    style: 'destructive',
+                    onPress: async () => { await logout(); },
+                },
+            ]
+        );
     };
 
     return (
@@ -139,6 +126,11 @@ export default function AccountScreen({ navigation }) {
                         </TouchableOpacity>
                     ))}
                 </View>
+
+                <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+                    <Ionicons name="log-out-outline" size={22} color="#FF3B30" />
+                    <Text style={styles.logoutLabel}>Logout</Text>
+                </TouchableOpacity>
 
                 <View style={{ height: 30 }} />
             </ScrollView>
@@ -272,5 +264,21 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '700',
         color: '#1C1C1E',
-    }
+    },
+    logoutBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginHorizontal: 25,
+        marginTop: 20,
+        paddingVertical: 18,
+        borderRadius: 20,
+        backgroundColor: '#FFF1F1',
+        gap: 10,
+    },
+    logoutLabel: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#FF3B30',
+    },
 });

@@ -40,6 +40,11 @@ export default function AttendanceHistoryScreen({ navigation }) {
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1); // 1-12
 
     useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', loadAttendanceHistory);
+        return unsubscribe;
+    }, [navigation]);
+
+    useEffect(() => {
         loadAttendanceHistory();
     }, [currentDate]);
 

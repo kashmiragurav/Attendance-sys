@@ -268,6 +268,7 @@ const styles = StyleSheet.create({
     },
     info: {
         flex: 1,
+        minWidth: 0,
     },
     empName: {
         fontSize: 16,

@@ -72,9 +72,9 @@ export default function PersonalDetailsScreen({ navigation }) {
 
             <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
                 <View style={styles.form}>
-                    {/* Staff Name */}
+                    {/* Employee Name */}
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Staff Name</Text>
+                        <Text style={styles.label}>Employee Name</Text>
                         <TextInput
                             style={styles.input}
                             value={formData.name}
