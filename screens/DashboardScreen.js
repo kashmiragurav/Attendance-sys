@@ -54,8 +54,7 @@ export default function DashboardScreen({ navigation }) {
     const isFaceEnabled = isFeatureEnabled(FEATURES.FACE_RECOGNITION);
 
     if (!isFaceEnabled) {
-      // If face scan is not allowed in plan, fall back to simple attendance or location scan
-      navigation.navigate('AttendanceScan');
+      navigation.navigate('AttendanceScan', { isWFH });
       return;
     }
 
@@ -179,7 +178,7 @@ export default function DashboardScreen({ navigation }) {
               <View>
                 <Text style={[styles.wfhTitle, isWFH && { color: '#FFF' }]}>Work From Home Mode</Text>
                 <Text style={[styles.wfhSubtitle, isWFH && { color: '#FFE' }]}>
-                  {isWFH ? 'Location validation bypassed' : 'Enable to work remotely'}
+                  {isWFH ? 'Geo-fence & WiFi validation bypassed' : 'Enable to work remotely'}
                 </Text>
               </View>
             </View>

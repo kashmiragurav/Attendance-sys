@@ -8,6 +8,8 @@ import {
     FlatList,
     Modal,
     ScrollView,
+    ActivityIndicator,
+    Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar } from 'react-native-calendars';
@@ -16,11 +18,13 @@ import { db } from '../services/firebaseConfig';
 import { formatDate } from '../utils/attendance';
 import Colors, { shadows } from '../constants/Colors';
 import BottomNavigation from '../components/BottomNavigation';
+import { buildEmployeeReportHtml, generateAndSharePdf } from '../utils/attendancePdf';
 
 export default function AttendanceHistoryScreen({ navigation }) {
     const { user } = useAuth();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [pdfLoading, setPdfLoading] = useState(false);
     const [attendanceRecords, setAttendanceRecords] = useState([]);
     const [markedDates, setMarkedDates] = useState({});
     const [currentDate, setCurrentDate] = useState(new Date()); // Tracks the calendar month
@@ -213,6 +217,33 @@ export default function AttendanceHistoryScreen({ navigation }) {
         setCurrentDate(date);
     };
 
+    const handleExportPdf = async () => {
+        if (pdfLoading) return;
+        const monthRecords = attendanceRecords.filter(r => {
+            const d = new Date(r.date);
+            return d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear();
+        });
+        if (monthRecords.length === 0) {
+            Alert.alert('No Data', 'No attendance records found for this month.');
+            return;
+        }
+        try {
+            setPdfLoading(true);
+            const monthName = currentDate.toLocaleString('default', { month: 'long' });
+            const year = currentDate.getFullYear();
+            const html = buildEmployeeReportHtml(
+                { name: user.name, employeeId: user.employeeId, companyName: user.companyName },
+                monthRecords,
+                { month: monthName, year }
+            );
+            const filename = `attendance_${user.employeeId}_${monthName}_${year}.pdf`;
+            const result = await generateAndSharePdf(html, filename);
+            if (!result.ok) Alert.alert('Export Failed', result.error);
+        } finally {
+            setPdfLoading(false);
+        }
+    };
+
     const confirmDateSelection = () => {
         const newDate = new Date(selectedYear, selectedMonth - 1, 1);
         setCurrentDate(newDate);
@@ -243,7 +274,11 @@ export default function AttendanceHistoryScreen({ navigation }) {
                     <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>{user?.name || 'User Name'}</Text>
-                <View style={{ width: 24 }} />
+                <TouchableOpacity onPress={handleExportPdf} disabled={pdfLoading}>
+                    {pdfLoading
+                        ? <ActivityIndicator size="small" color="#FFFFFF" />
+                        : <Ionicons name="document-text-outline" size={24} color="#FFFFFF" />}
+                </TouchableOpacity>
             </View>
 
             {/* Month Selector Bar */}
@@ -344,6 +379,11 @@ export default function AttendanceHistoryScreen({ navigation }) {
                             <View style={styles.statusBadgeLarge}>
                                 <View style={[styles.statusDot, { backgroundColor: getStatusColor(selectedDay?.status || 'absent') }]} />
                                 <Text style={styles.statusTextLarge}>{selectedDay?.status?.toUpperCase() || 'ABSENT'}</Text>
+                                {selectedDay?.attendanceMode && (
+                                    <Text style={[styles.statusTextLarge, { marginLeft: 8, color: selectedDay.attendanceMode === 'WFH' ? '#F39C12' : '#4A90E2' }]}>
+                                        {selectedDay.attendanceMode === 'WFH' ? '🏠 WFH' : '🏢 OFFICE'}
+                                    </Text>
+                                )}
                             </View>
 
                             <View style={styles.detailsGrid}>

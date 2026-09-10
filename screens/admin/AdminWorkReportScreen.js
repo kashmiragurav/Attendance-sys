@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     StyleSheet,
     Text,
@@ -11,12 +12,14 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/firebaseConfig';
+import { buildAdminReportHtml, generateAndSharePdf } from '../../utils/attendancePdf';
 
 export default function AdminWorkReportScreen({ navigation }) {
     const { user } = useAuth();
     const [reportData, setReportData] = useState([]);
     const [filteredData, setFilteredData] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [pdfLoading, setPdfLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedDate, setSelectedDate] = useState(new Date());
 
@@ -67,6 +70,8 @@ export default function AdminWorkReportScreen({ navigation }) {
                 const paidLeave = empRecords.filter(a => a.status === 'paid_leave').length;
                 const totalHours = empRecords.reduce((acc, a) => acc + (a.workHours || 0), 0);
 
+                const wfhDays = empRecords.filter(a => a.attendanceMode === 'WFH').length;
+
                 return {
                     uid: emp.uid,
                     name: emp.name,
@@ -77,6 +82,7 @@ export default function AdminWorkReportScreen({ navigation }) {
                     halfDay,
                     absent,
                     paidLeave,
+                    wfhDays,
                     totalHours: parseFloat(totalHours.toFixed(1)),
                 };
             }).sort((a, b) => a.name.localeCompare(b.name));
@@ -87,6 +93,22 @@ export default function AdminWorkReportScreen({ navigation }) {
             console.error('Error loading work report:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleExportPdf = async () => {
+        if (pdfLoading || reportData.length === 0) return;
+        try {
+            setPdfLoading(true);
+            const monthName = months[selectedDate.getMonth()];
+            const year = selectedDate.getFullYear();
+            const companyName = user?.companyName || 'Company';
+            const html = buildAdminReportHtml(companyName, reportData, { month: monthName, year });
+            const filename = `attendance_${monthName}_${year}.pdf`;
+            const result = await generateAndSharePdf(html, filename);
+            if (!result.ok) Alert.alert('Export Failed', result.error);
+        } finally {
+            setPdfLoading(false);
         }
     };
 
@@ -145,6 +167,15 @@ export default function AdminWorkReportScreen({ navigation }) {
                 <Text style={styles.headerTitle}>Work Report</Text>
                 <TouchableOpacity onPress={loadReport} style={styles.refreshButton}>
                     <Ionicons name="refresh" size={22} color="#4A90E2" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                    onPress={handleExportPdf}
+                    style={[styles.refreshButton, { marginLeft: 4 }]}
+                    disabled={pdfLoading || reportData.length === 0}
+                >
+                    {pdfLoading
+                        ? <ActivityIndicator size="small" color="#E74C3C" />
+                        : <Ionicons name="document-text-outline" size={22} color="#E74C3C" />}
                 </TouchableOpacity>
             </View>
 

@@ -22,8 +22,10 @@ import { uploadAttendancePhoto } from '../utils/photoUpload';
 import { validateWifi } from '../utils/wifiValidator';
 import Colors, { gradients, shadows } from '../constants/Colors';
 
-export default function AttendanceScanScreen({ navigation }) {
+export default function AttendanceScanScreen({ navigation, route }) {
     const { user, isFeatureEnabled, FEATURES, company } = useAuth();
+    const isWFH = route?.params?.isWFH === true;
+    const attendanceMode = isWFH ? 'WFH' : 'OFFICE';
     const [loading, setLoading] = useState(false);
     const [todayAttendance, setTodayAttendance] = useState(null);
     const [officeSettings, setOfficeSettings] = useState(null);
@@ -66,6 +68,8 @@ export default function AttendanceScanScreen({ navigation }) {
     const getDefaultSettings = () => resolveConfig(null);
 
     const checkWifiIfRequired = async () => {
+        // WFH employees are not on the office network — skip WiFi restriction
+        if (isWFH) return true;
         if (!company?.wifiRestrictionEnabled) return true;
         const result = await validateWifi(company.allowedWifis || []);
         if (result.failOpen) {
@@ -122,7 +126,7 @@ export default function AttendanceScanScreen({ navigation }) {
             const wifiOk = await checkWifiIfRequired();
             if (!wifiOk) { setLoading(false); return; }
             const settings = officeSettings || getDefaultSettings();
-            const locResult = await checkAttendanceLocation(settings);
+            const locResult = await checkAttendanceLocation(settings, attendanceMode);
             setLoading(false);
             if (!locResult.ok) {
                 Alert.alert('Location Error', locResult.message);
@@ -205,6 +209,7 @@ export default function AttendanceScanScreen({ navigation }) {
                     lateMinutes: status.lateMinutes || 0,
                     method: isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'face_scan' : 'geo_location',
                     faceVerified: isFeatureEnabled(FEATURES.FACE_RECOGNITION),
+                    attendanceMode,
                     location: locationData,
                     updatedAt: now.toISOString(),
                 };
@@ -240,6 +245,7 @@ export default function AttendanceScanScreen({ navigation }) {
                     lateMinutes: status.lateMinutes || 0,
                     method: isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'face_scan' : 'geo_location',
                     faceVerified: isFeatureEnabled(FEATURES.FACE_RECOGNITION),
+                    attendanceMode,
                     location: locationData,
                     createdAt: now.toISOString(),
                     updatedAt: now.toISOString(),
@@ -258,7 +264,7 @@ export default function AttendanceScanScreen({ navigation }) {
 
             Alert.alert(
                 'Check-In Successful! ✅',
-                `Time: ${formatTime(now)}\nSession: ${sessionNumber}\nMethod: ${isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'Face Scan' : 'Geo-Location Scan'}${locationText}`,
+                `Time: ${formatTime(now)}\nMode: ${attendanceMode}\nSession: ${sessionNumber}\nMethod: ${isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'Face Scan' : 'Geo-Location Scan'}${locationText}`,
                 [{ text: 'OK' }]
             );
         } catch (error) {
@@ -280,7 +286,7 @@ export default function AttendanceScanScreen({ navigation }) {
             const wifiOk = await checkWifiIfRequired();
             if (!wifiOk) { setLoading(false); return; }
             const settings = officeSettings || getDefaultSettings();
-            const locResult = await checkAttendanceLocation(settings);
+            const locResult = await checkAttendanceLocation(settings, attendanceMode);
             setLoading(false);
             if (!locResult.ok) {
                 Alert.alert('Location Error', locResult.message);
@@ -367,6 +373,7 @@ export default function AttendanceScanScreen({ navigation }) {
                 status: status.status,
                 method: isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'face_scan' : 'geo_location',
                 faceVerified: isFeatureEnabled(FEATURES.FACE_RECOGNITION),
+                attendanceMode,
                 checkoutLocation: locationData,
                 updatedAt: now.toISOString(),
             };
@@ -382,7 +389,7 @@ export default function AttendanceScanScreen({ navigation }) {
 
             Alert.alert(
                 'Check-Out Successful! ✅',
-                `Time: ${formatTime(now)}\nSession ${sessionNumber} Hours: ${sessionHours.toFixed(1)} hrs\nTotal Work Hours: ${totalWorkHours.toFixed(1)} hrs\nStatus: ${status.status.toUpperCase()}\nMethod: ${isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'Face Scan' : 'Geo-Location Scan'}${locationText}`,
+                `Time: ${formatTime(now)}\nMode: ${attendanceMode}\nSession ${sessionNumber} Hours: ${sessionHours.toFixed(1)} hrs\nTotal Work Hours: ${totalWorkHours.toFixed(1)} hrs\nStatus: ${status.status.toUpperCase()}\nMethod: ${isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'Face Scan' : 'Geo-Location Scan'}${locationText}`,
                 [{ text: 'OK' }]
             );
         } catch (error) {
@@ -547,8 +554,8 @@ export default function AttendanceScanScreen({ navigation }) {
                 >
                     <Ionicons name="arrow-back" size={24} color={Colors.textInverse} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>{isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'Face Attendance' : 'Mark Attendance'}</Text>
-                <Text style={styles.headerSubtitle}>{isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'Smart Verification Active' : 'Scan to check-in/out'}</Text>
+                <Text style={styles.headerTitle}>{isWFH ? 'WFH Attendance' : (isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'Face Attendance' : 'Mark Attendance')}</Text>
+                <Text style={styles.headerSubtitle}>{isWFH ? 'Work From Home Mode' : (isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'Smart Verification Active' : 'Scan to check-in/out')}</Text>
             </LinearGradient>
 
             <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>

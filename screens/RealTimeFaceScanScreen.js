@@ -31,6 +31,7 @@ import { faceDetectorSettings, isNativeDetectorAvailable } from '../utils/faceRe
 export default function RealTimeFaceScanScreen({ navigation, route }) {
     const { user, isFeatureEnabled, FEATURES, updateProfile, company } = useAuth();
     const { action, onSuccess, isWFH } = route.params || {};
+    const attendanceMode = isWFH ? 'WFH' : 'OFFICE';
     const [permission, requestPermission] = useCameraPermissions();
     const cameraRef = useRef(null);
 
@@ -179,6 +180,8 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
     };
 
     const checkWifi = async () => {
+        // WFH employees are not on the office network — skip WiFi restriction
+        if (isWFH) return true;
         if (!company?.wifiRestrictionEnabled) return true;
 
         const allowedNetworks = company.allowedWifis || [];
@@ -283,7 +286,7 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
             // Track whether this was a real verification or simulated
             const isSimulated = apiResult.simulated === true;
 
-            // 2. Geo-fencing check
+            // 2. Geo-fencing check — WFH skips geo-fence but GPS is still captured for audit
             if (isFeatureEnabled(FEATURES.GEO_LOCATION) && officeSettings?.geoFencing?.enabled && !isWFH) {
                 const coordsToCheck = location || null;
                 if (!coordsToCheck) {
@@ -375,9 +378,9 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                     sessions,
                     isLate: status.isLate,
                     lateMinutes: status.lateMinutes || 0,
-                    method: isWFH ? 'wfh_scan' : 'face_scan',
+                    method: isWFH ? 'wfh_face_scan' : 'face_scan',
                     faceVerified: !isSimulated,
-                    isWFH: !!isWFH,
+                    attendanceMode,
                     deviceId: await AsyncStorage.getItem('app_device_id') || 'Unknown',
                     location: location,
                     createdAt: todayRecord ? todayRecord.data().createdAt : now.toISOString(),

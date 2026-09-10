@@ -124,11 +124,12 @@ export const validateGeoFence = (coords, geoFencing) => {
  * Returns { ok: true, locationData } or { ok: false, message }.
  *
  * @param {{ geoFencing: object }} officeSettings  resolved attendance config
- * @param {boolean} skipGeoFence  pass true for WFH flows
+ * @param {'OFFICE'|'WFH'} attendanceMode  WFH skips geo-fence validation but still captures GPS
  */
-export const checkAttendanceLocation = async (officeSettings, skipGeoFence = false) => {
+export const checkAttendanceLocation = async (officeSettings, attendanceMode = 'OFFICE') => {
     const geoFencing = officeSettings?.geoFencing;
-    const geoFenceRequired = geoFencing?.enabled && !skipGeoFence;
+    const isWFH = attendanceMode === 'WFH';
+    const geoFenceRequired = geoFencing?.enabled && !isWFH;
 
     const locationResult = await acquireLocation();
 
@@ -137,7 +138,7 @@ export const checkAttendanceLocation = async (officeSettings, skipGeoFence = fal
         if (geoFenceRequired) {
             return { ok: false, message: locationResult.message };
         }
-        // Geo-fence not required — proceed without location data.
+        // Geo-fence not required (WFH or geo-fence disabled) — proceed without location data.
         return { ok: true, locationData: null };
     }
 
