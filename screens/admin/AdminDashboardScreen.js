@@ -376,7 +376,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         marginTop: 5,
-        height: 120,
+        minHeight: 110,
     },
     mainStatCard: {
         backgroundColor: '#F2F2F7',

@@ -161,20 +161,20 @@ export default function AdminWorkReportScreen({ navigation }) {
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                    <Ionicons name="arrow-back" size={24} color="#2C3E50" />
+                    <Ionicons name="arrow-back" size={24} color="#1C1C1E" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Work Report</Text>
                 <TouchableOpacity onPress={loadReport} style={styles.refreshButton}>
-                    <Ionicons name="refresh" size={22} color="#4A90E2" />
+                    <Ionicons name="refresh" size={20} color="#4A90E2" />
                 </TouchableOpacity>
                 <TouchableOpacity
                     onPress={handleExportPdf}
-                    style={[styles.refreshButton, { marginLeft: 4 }]}
+                    style={[styles.refreshButton, { marginLeft: 8 }]}
                     disabled={pdfLoading || reportData.length === 0}
                 >
                     {pdfLoading
                         ? <ActivityIndicator size="small" color="#E74C3C" />
-                        : <Ionicons name="document-text-outline" size={22} color="#E74C3C" />}
+                        : <Ionicons name="document-text-outline" size={20} color="#E74C3C" />}
                 </TouchableOpacity>
             </View>
 
@@ -258,82 +258,89 @@ const StatCell = ({ label, value, color }) => (
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F8F9FA',
-        paddingTop: 50,
+        backgroundColor: '#F5F7FA',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 20,
-        marginBottom: 15,
+        paddingTop: 60,
+        paddingBottom: 16,
+        backgroundColor: '#FFFFFF',
+        borderBottomWidth: 1,
+        borderBottomColor: '#F2F2F7',
     },
-    backButton: { padding: 5 },
-    headerTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#2C3E50',
+    backButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: '#F2F2F7',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    refreshButton: { padding: 5 },
+    headerTitle: { fontSize: 18, fontWeight: '800', color: '#1C1C1E' },
+    refreshButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        backgroundColor: '#EBF5FF',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     monthSelector: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         backgroundColor: '#FFF',
         marginHorizontal: 20,
-        padding: 12,
-        borderRadius: 15,
+        marginTop: 16,
+        padding: 14,
+        borderRadius: 14,
         marginBottom: 12,
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
     },
     monthInfo: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    monthText: { fontSize: 16, fontWeight: 'bold', color: '#2C3E50' },
+    monthText: { fontSize: 15, fontWeight: '700', color: '#1C1C1E' },
     summaryBar: {
         flexDirection: 'row',
         backgroundColor: '#FFF',
         marginHorizontal: 20,
-        borderRadius: 15,
-        padding: 15,
+        borderRadius: 14,
+        padding: 16,
         marginBottom: 12,
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
     },
     summaryItem: { flex: 1, alignItems: 'center' },
     summaryValue: { fontSize: 20, fontWeight: '800', color: '#1C1C1E' },
     summaryLabel: { fontSize: 11, color: '#8E8E93', fontWeight: '600', marginTop: 2 },
-    summaryDivider: { width: 1, backgroundColor: '#F0F0F0' },
+    summaryDivider: { width: 1, backgroundColor: '#F2F2F7' },
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#FFF',
         marginHorizontal: 20,
         paddingHorizontal: 15,
-        height: 45,
+        height: 46,
         borderRadius: 12,
         marginBottom: 12,
-        elevation: 1,
         borderWidth: 1,
-        borderColor: '#E0E0E0',
+        borderColor: '#E5E5EA',
     },
-    searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#2C3E50' },
+    searchInput: { flex: 1, marginLeft: 10, fontSize: 14, color: '#1C1C1E' },
     listContent: { paddingHorizontal: 20, paddingBottom: 30 },
     card: {
         backgroundColor: '#FFF',
-        borderRadius: 15,
-        padding: 15,
-        marginBottom: 12,
-        elevation: 2,
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 10,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 3,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 6,
+        elevation: 2,
     },
     cardHeader: {
         flexDirection: 'row',
@@ -342,8 +349,8 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     empInfo: { flex: 1, marginRight: 10 },
-    empName: { fontSize: 15, fontWeight: '700', color: '#2C3E50' },
-    empId: { fontSize: 12, color: '#95A5A6', marginTop: 2 },
+    empName: { fontSize: 15, fontWeight: '700', color: '#1C1C1E' },
+    empId: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
     hoursBox: {
         alignItems: 'center',
         backgroundColor: '#EBF5FF',
@@ -357,14 +364,14 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         borderTopWidth: 1,
-        borderTopColor: '#F0F0F0',
+        borderTopColor: '#F2F2F7',
         paddingTop: 12,
     },
     statCell: { flex: 1, alignItems: 'center' },
-    statValue: { fontSize: 16, fontWeight: '800' },
-    statLabel: { fontSize: 10, color: '#95A5A6', marginTop: 2 },
+    statValue: { fontSize: 15, fontWeight: '800' },
+    statLabel: { fontSize: 10, color: '#8E8E93', marginTop: 2, fontWeight: '600' },
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    loadingText: { marginTop: 10, color: '#7F8C8D' },
+    loadingText: { marginTop: 10, color: '#8E8E93', fontSize: 14 },
     emptyContainer: { alignItems: 'center', marginTop: 80 },
-    emptyText: { marginTop: 10, color: '#BDC3C7', fontSize: 14 },
+    emptyText: { marginTop: 10, color: '#AEAEB2', fontSize: 14 },
 });

@@ -55,7 +55,7 @@ export default function BottomNavigation() {
                         <Ionicons
                             name={tab.icon}
                             size={24}
-                            color={isActive ? '#FFFFFF' : '#95A5A6'}
+                            color={isActive ? '#4A90E2' : '#95A5A6'}
                         />
                         <Text style={[styles.label, isActive && styles.labelActive]}>
                             {tab.label}
@@ -72,22 +72,23 @@ const styles = StyleSheet.create({
     container: {
         flexDirection: 'row',
         backgroundColor: '#FFFFFF',
-        paddingTop: 10,
+        paddingTop: 8,
         paddingBottom: 25,
-        paddingHorizontal: 16,
+        paddingHorizontal: 8,
         borderTopWidth: 1,
         borderTopColor: '#F2F2F7',
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: -10 },
-        shadowOpacity: 0.03,
-        shadowRadius: 15,
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 12,
         elevation: 10,
     },
     tab: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 4,
+        paddingVertical: 6,
+        borderRadius: 12,
     },
     label: {
         fontSize: 11,
@@ -102,11 +103,11 @@ const styles = StyleSheet.create({
     },
     indicator: {
         position: 'absolute',
-        top: -10,
+        top: 0,
         width: 32,
-        height: 4,
+        height: 3,
         backgroundColor: '#4A90E2',
-        borderBottomLeftRadius: 4,
-        borderBottomRightRadius: 4,
+        borderBottomLeftRadius: 3,
+        borderBottomRightRadius: 3,
     },
 });
