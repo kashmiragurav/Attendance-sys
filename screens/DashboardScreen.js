@@ -43,6 +43,7 @@ export default function DashboardScreen({ navigation }) {
       }
     } catch (error) {
       console.error('Error loading attendance:', error);
+      // Non-critical — dashboard still renders, just shows no attendance data
     }
   };
 

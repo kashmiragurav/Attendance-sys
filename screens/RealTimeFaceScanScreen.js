@@ -457,11 +457,16 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                     ];
                 }
 
-                const totalWorkHours = updatedSessions.reduce((t, s) => t + (s.sessionHours || 0), 0);
+                const totalWorkHours = parseFloat(
+                    updatedSessions.reduce((t, s) => t + (s.sessionHours || 0), 0).toFixed(2)
+                );
                 const firstCheckIn = new Date(updatedSessions[0].checkIn);
+                const totalBreakMinutes = (data.breaks || []).filter(b => b.end)
+                    .reduce((t, b) => t + (b.durationMinutes || 0), 0);
                 const status = calculateAttendanceStatus(firstCheckIn, now, {
                     ...resolveConfig(officeSettings),
                     workHours: totalWorkHours,
+                    totalBreakMinutes,
                 });
 
                 await attendanceHelpers.writeAttendanceRecord(user.uid, user.companyId, todayRecord.id, {
@@ -470,7 +475,8 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                     checkOut: now.toISOString(),
                     checkOutTime: formatTime(now),
                     sessions: updatedSessions,
-                    workHours: parseFloat(totalWorkHours.toFixed(2)),
+                    workHours: totalWorkHours,
+                    totalBreakMinutes,
                     status: status.status,
                     checkoutLocation: location,
                     updatedAt: now.toISOString(),
@@ -612,6 +618,7 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                                 { backgroundColor: action === 'check-in' ? '#37B46F' : '#E74C3C' }
                             ]}
                             onPress={startAutomatedScan}
+                            disabled={processing}
                         >
                             <Text style={styles.startButtonText}>
                                 {action === 'check-in' ? 'START PUNCH IN' : 'START PUNCH OUT'}
@@ -640,9 +647,11 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                                         }
                                     ]}
                                     onPress={() => {
+                                        if (processing) return;
                                         setLivenessStatus('success');
                                         handleCapture();
                                     }}
+                                    disabled={processing}
                                 >
                                     <Text style={styles.startButtonText}>
                                         {action === 'check-in' ? 'PUNCH IN' : 'PUNCH OUT'}

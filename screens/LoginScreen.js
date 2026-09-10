@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#6C6C70',
     marginTop: 5,
     fontWeight: '500',
@@ -446,6 +446,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 10,
     elevation: 5,
+  },
+  loginButtonDisabled: {
+    opacity: 0.6,
   },
   loginButtonGradient: {
     flex: 1,

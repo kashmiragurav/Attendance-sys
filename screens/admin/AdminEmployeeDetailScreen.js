@@ -188,7 +188,7 @@ export default function AdminEmployeeDetailScreen({ route, navigation }) {
                                 <Text style={styles.infoLabel}>Password</Text>
                             </View>
                             <View style={styles.passwordRight}>
-                                <Text style={styles.infoValue}>
+                                <Text style={[styles.infoValue, { flexShrink: 1 }]} numberOfLines={1}>
                                     {(employee.plainPassword || employee.password)
                                         ? (showPassword ? (employee.plainPassword || employee.password) : '••••••••')
                                         : '•••••• (Hashed)'}
@@ -528,20 +528,27 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         borderBottomWidth: 1,
         borderBottomColor: '#F0F0F0',
+        gap: 8,
     },
     infoLeft: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
+        flexShrink: 0,
+        maxWidth: '45%',
     },
     infoLabel: {
         fontSize: 14,
         color: '#95A5A6',
+        flexShrink: 1,
     },
     infoValue: {
         fontSize: 14,
         color: '#2C3E50',
         fontWeight: '600',
+        flex: 1,
+        textAlign: 'right',
+        flexWrap: 'wrap',
     },
     actionButton: {
         flexDirection: 'row',
@@ -578,6 +585,9 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
+        flex: 1,
+        justifyContent: 'flex-end',
+        minWidth: 0,
     },
     eyeButton: {
         padding: 5,

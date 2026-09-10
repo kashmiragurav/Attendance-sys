@@ -6,6 +6,7 @@ import {
     TouchableOpacity,
     StatusBar,
     ActivityIndicator,
+    Alert,
     Modal,
     ScrollView,
 } from 'react-native';
@@ -20,7 +21,7 @@ export default function AdminEmployeeHistoryScreen({ route, navigation }) {
     const [loading, setLoading] = useState(true);
     const [markedDates, setMarkedDates] = useState({});
     const [currentDate, setCurrentDate] = useState(new Date());
-    const [stats, setStats] = useState({ present: 0, absent: 0, late: 0, paidLeave: 0 });
+    const [stats, setStats] = useState({ present: 0, absent: 0, late: 0, halfDay: 0, paidLeave: 0 });
     const [showMonthPicker, setShowMonthPicker] = useState(false);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -46,6 +47,7 @@ export default function AdminEmployeeHistoryScreen({ route, navigation }) {
             generateMarkedDates(records);
         } catch (error) {
             console.error('Error loading history:', error);
+            Alert.alert('Load Failed', 'Could not load attendance history. Please check your connection and try again.');
         } finally {
             setLoading(false);
         }
@@ -60,8 +62,9 @@ export default function AdminEmployeeHistoryScreen({ route, navigation }) {
         });
 
         setStats({
-            present: monthRecords.filter(r => r.status === 'present').length,
-            late: monthRecords.filter(r => r.status === 'late' || r.status === 'half_day').length,
+            present: monthRecords.filter(r => r.status === 'present' || r.status === 'late').length,
+            late: monthRecords.filter(r => r.status === 'late').length,
+            halfDay: monthRecords.filter(r => r.status === 'half_day').length,
             absent: monthRecords.filter(r => r.status === 'absent').length,
             paidLeave: monthRecords.filter(r => r.status === 'paid_leave').length,
         });
@@ -154,8 +157,9 @@ export default function AdminEmployeeHistoryScreen({ route, navigation }) {
             <View style={styles.statsCard}>
                 <StatItem label="Present" value={stats.present} color="#2ECC71" />
                 <StatItem label="Late" value={stats.late} color="#F39C12" />
+                <StatItem label="Half Day" value={stats.halfDay} color="#9B59B6" />
                 <StatItem label="Absent" value={stats.absent} color="#E74C3C" />
-                <StatItem label="Paid Leave" value={stats.paidLeave} color="#4A90E2" />
+                <StatItem label="Leave" value={stats.paidLeave} color="#4A90E2" />
             </View>
 
             {loading ? (

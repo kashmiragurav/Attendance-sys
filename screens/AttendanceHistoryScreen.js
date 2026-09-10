@@ -63,6 +63,7 @@ export default function AttendanceHistoryScreen({ navigation }) {
             generateMarkedDates(userRecords);
         } catch (error) {
             console.error('Error loading attendance history:', error);
+            Alert.alert('Load Failed', 'Could not load attendance history. Please check your connection and try again.');
         } finally {
             setLoading(false);
         }
@@ -80,8 +81,8 @@ export default function AttendanceHistoryScreen({ navigation }) {
         });
 
         // 2. Calculate actual counts from records
-        let present = monthRecords.filter(r => r.status === 'present').length;
-        let halfDay = monthRecords.filter(r => r.status === 'half_day' || r.status === 'late').length;
+        let present = monthRecords.filter(r => r.status === 'present' || r.status === 'late').length;
+        let halfDay = monthRecords.filter(r => r.status === 'half_day').length;
         let manualAbsent = monthRecords.filter(r => r.status === 'absent').length;
         let paidLeaves = monthRecords.filter(r => r.status === 'paid_leave').length;
 
@@ -529,28 +530,26 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
     },
     header: {
-        backgroundColor: '#FFFFFF',
+        backgroundColor: '#4A90E2',
         paddingTop: 60,
         paddingBottom: 20,
         paddingHorizontal: 25,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        borderBottomWidth: 1,
-        borderBottomColor: '#F2F2F7',
     },
     backButton: {
         width: 44,
         height: 44,
         borderRadius: 14,
-        backgroundColor: '#F2F2F7',
+        backgroundColor: 'rgba(255,255,255,0.2)',
         justifyContent: 'center',
         alignItems: 'center',
     },
     headerTitle: {
         fontSize: 20,
         fontWeight: '900',
-        color: '#1C1C1E',
+        color: '#FFFFFF',
     },
     monthSelectorContainer: {
         alignItems: 'center',

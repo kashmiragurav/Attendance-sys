@@ -121,11 +121,11 @@ export default function AdminLogsScreen({ navigation }) {
 
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                    <Ionicons name="arrow-back" size={24} color="#2C3E50" />
+                    <Ionicons name="arrow-back" size={24} color="#1C1C1E" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>System Logs</Text>
                 <TouchableOpacity onPress={loadLogs} style={styles.refreshButton}>
-                    <Ionicons name="refresh" size={22} color="#4A90E2" />
+                    <Ionicons name="refresh" size={20} color="#4A90E2" />
                 </TouchableOpacity>
             </View>
 
@@ -155,43 +155,62 @@ export default function AdminLogsScreen({ navigation }) {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F8F9FA',
-        paddingTop: 50,
+        backgroundColor: '#F5F7FA',
     },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 20,
-        marginBottom: 20,
+        paddingTop: 60,
+        paddingBottom: 20,
+        backgroundColor: '#FFFFFF',
+        borderBottomWidth: 1,
+        borderBottomColor: '#F2F2F7',
+        marginBottom: 0,
     },
-    backButton: { padding: 5 },
+    backButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: '#F2F2F7',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     headerTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#2C3E50',
+        fontSize: 18,
+        fontWeight: '800',
+        color: '#1C1C1E',
     },
-    refreshButton: { padding: 5 },
+    refreshButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: '#EBF5FF',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     listContent: {
         paddingHorizontal: 20,
+        paddingTop: 16,
         paddingBottom: 30,
     },
     logCard: {
         backgroundColor: '#FFF',
-        borderRadius: 12,
-        padding: 15,
+        borderRadius: 14,
+        padding: 14,
         marginBottom: 10,
         flexDirection: 'row',
-        elevation: 1,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
+        shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
-        shadowRadius: 2,
+        shadowRadius: 5,
+        elevation: 2,
     },
     indicator: {
         width: 4,
         borderRadius: 2,
-        marginRight: 15,
+        marginRight: 14,
     },
     logInfo: {
         flex: 1,
@@ -203,35 +222,35 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     empName: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: '#2C3E50',
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1C1C1E',
     },
     logTime: {
         fontSize: 14,
-        fontWeight: 'bold',
+        fontWeight: '700',
         color: '#4A90E2',
     },
     empId: {
         fontSize: 12,
-        color: '#7F8C8D',
+        color: '#8E8E93',
     },
     logDate: {
         fontSize: 12,
-        color: '#95A5A6',
+        color: '#8E8E93',
     },
     statusRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 5,
+        marginTop: 6,
         gap: 8,
     },
     methodBadge: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 10,
+        paddingVertical: 3,
+        borderRadius: 8,
         gap: 4,
     },
     statusText: {
@@ -240,7 +259,7 @@ const styles = StyleSheet.create({
     },
     methodText: {
         fontSize: 10,
-        color: '#555',
+        color: '#6C6C70',
         fontWeight: '600',
     },
     loadingContainer: {
@@ -250,7 +269,8 @@ const styles = StyleSheet.create({
     },
     loadingText: {
         marginTop: 10,
-        color: '#7F8C8D',
+        color: '#8E8E93',
+        fontSize: 14,
     },
     emptyContainer: {
         alignItems: 'center',
@@ -258,6 +278,7 @@ const styles = StyleSheet.create({
     },
     emptyText: {
         marginTop: 10,
-        color: '#BDC3C7',
+        color: '#AEAEB2',
+        fontSize: 14,
     },
 });
