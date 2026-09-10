@@ -31,11 +31,7 @@ export default function AttendanceScanScreen({ navigation, route }) {
     const [officeSettings, setOfficeSettings] = useState(null);
     const [breakLoading, setBreakLoading] = useState(false);
 
-    useEffect(() => {
-        loadData();
-    }, []);
-
-    // Re-load when screen comes back into focus (e.g. returning from face scan)
+    // Load on mount and every time the screen comes back into focus
     useEffect(() => {
         const unsubscribe = navigation.addListener('focus', loadData);
         return unsubscribe;
