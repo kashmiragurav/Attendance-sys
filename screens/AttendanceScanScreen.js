@@ -108,28 +108,27 @@ export default function AttendanceScanScreen({ navigation, route }) {
     };
 
     const handleCheckIn = async () => {
+        if (loading) return;
         if (isFeatureEnabled(FEATURES.FACE_RECOGNITION)) {
+            setLoading(true);
             navigation.navigate('RealTimeFaceScan', {
                 action: 'check-in',
-                onSuccess: performCheckIn
+                onSuccess: (locationData) => { setLoading(false); performCheckIn(locationData); },
             });
+            // loading cleared by onSuccess or when screen re-focuses after cancel
+            const unsubscribe = navigation.addListener('focus', () => { setLoading(false); unsubscribe(); });
         } else {
             setLoading(true);
             const wifiOk = await checkWifiIfRequired();
             if (!wifiOk) { setLoading(false); return; }
             const settings = officeSettings || getDefaultSettings();
             const locResult = await checkAttendanceLocation(settings, attendanceMode);
-            setLoading(false);
-            if (!locResult.ok) {
-                Alert.alert('Location Error', locResult.message);
-                return;
-            }
+            if (!locResult.ok) { setLoading(false); Alert.alert('Location Error', locResult.message); return; }
             performCheckIn(locResult.locationData);
         }
     };
 
     const performCheckIn = async (locationData) => {
-        if (loading) return;
         try {
             setLoading(true);
 
@@ -266,28 +265,26 @@ export default function AttendanceScanScreen({ navigation, route }) {
     };
 
     const handleCheckOut = async () => {
+        if (loading) return;
         if (isFeatureEnabled(FEATURES.FACE_RECOGNITION)) {
+            setLoading(true);
             navigation.navigate('RealTimeFaceScan', {
                 action: 'check-out',
-                onSuccess: performCheckOut
+                onSuccess: (locationData) => { setLoading(false); performCheckOut(locationData); },
             });
+            const unsubscribe = navigation.addListener('focus', () => { setLoading(false); unsubscribe(); });
         } else {
             setLoading(true);
             const wifiOk = await checkWifiIfRequired();
             if (!wifiOk) { setLoading(false); return; }
             const settings = officeSettings || getDefaultSettings();
             const locResult = await checkAttendanceLocation(settings, attendanceMode);
-            setLoading(false);
-            if (!locResult.ok) {
-                Alert.alert('Location Error', locResult.message);
-                return;
-            }
+            if (!locResult.ok) { setLoading(false); Alert.alert('Location Error', locResult.message); return; }
             performCheckOut(locResult.locationData);
         }
     };
 
     const performCheckOut = async (locationData) => {
-        if (loading) return;
         try {
             setLoading(true);
 
