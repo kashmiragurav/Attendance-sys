@@ -8,7 +8,7 @@ const BASE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/dat
 
 // Helper function to convert data to Firestore format
 const toFirestoreValue = (value) => {
-  if (value === undefined) return { nullValue: null }; // Avoid "type unset" error
+  if (value === undefined) return { nullValue: null };
   if (typeof value === 'string') return { stringValue: value };
   if (typeof value === 'number') {
     return Number.isInteger(value)
@@ -144,7 +144,7 @@ export const db = {
             return acc;
           }, {}) : {};
 
-          return { exists: true, data: () => data };
+          return { exists: true, id: docId, data: () => data };
         } catch (error) {
           console.error('Error getting document:', error);
           return { exists: false, data: () => null };
@@ -327,36 +327,93 @@ export const attendanceHelpers = {
     }
   },
 
-  getAttendanceByDate: async (userId, date) => {
+  /**
+   * Fetch today's attendance doc directly by its deterministic ID.
+   * Falls back to a userId query for legacy records with non-standard IDs.
+   * Always reads from Firestore — never from stale local state.
+   */
+  getTodayAttendanceDoc: async (userId, date) => {
     try {
-      const snapshot = await db.collection('attendance').getDocs();
-      const attendance = snapshot.docs.find(
-        doc => doc.data().userId === userId && doc.data().date === date
-      );
-      return attendance
-        ? { success: true, attendance: attendance.data() }
-        : { success: false, error: 'Attendance not found' };
+      const docId = `att_${userId}_${date}`;
+      const doc = await db.collection('attendance').doc(docId).get();
+      if (doc.exists) {
+        return { success: true, id: docId, data: doc.data() };
+      }
+      // Fallback for legacy records
+      const snapshot = await db.collection('attendance').where('userId', '==', userId);
+      const found = snapshot.docs.find(d => d.data().date === date);
+      if (found) {
+        return { success: true, id: found.id, data: found.data() };
+      }
+      return { success: false, id: docId, data: null };
     } catch (error) {
       return { success: false, error: error.message };
     }
   },
 
+  getAttendanceByDate: async (userId, date) => {
+    try {
+      const result = await attendanceHelpers.getTodayAttendanceDoc(userId, date);
+      if (result.success) {
+        return { success: true, attendance: result.data };
+      }
+      return { success: false, error: 'Attendance not found' };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  /**
+   * Fetch all attendance records for a user using a targeted where() query.
+   * Avoids full collection scan.
+   */
   getUserAttendance: async (userId) => {
     try {
-      const snapshot = await db.collection('attendance').getDocs();
+      const snapshot = await db.collection('attendance').where('userId', '==', userId);
       const records = snapshot.docs
-        .filter(doc => {
-          const docUserId = doc.data().userId;
-          return typeof docUserId === 'string' && typeof userId === 'string'
-            ? docUserId.toLowerCase() === userId.toLowerCase()
-            : docUserId === userId;
-        })
         .map(doc => doc.data())
         .sort((a, b) => new Date(b.date) - new Date(a.date));
       return { success: true, records };
     } catch (error) {
       return { success: false, error: error.message };
     }
+  },
+
+  /**
+   * Write an attendance record with ownership enforcement.
+   * Rejects writes where the record's userId does not match the authenticated user's uid,
+   * or where the companyId does not match. This is the primary security boundary
+   * since the REST API does not enforce Firestore security rules without a Firebase Auth token.
+   *
+   * @param {string} authenticatedUid  - uid from the verified session token
+   * @param {string} authenticatedCompanyId - companyId from the verified session token
+   * @param {string} docId - attendance document ID
+   * @param {object} data - attendance data to write
+   */
+  writeAttendanceRecord: async (authenticatedUid, authenticatedCompanyId, docId, data) => {
+    // Enforce: userId in the record must match the authenticated user
+    if (data.userId && data.userId !== authenticatedUid) {
+      console.error(`[Security] Blocked write: record userId ${data.userId} !== auth uid ${authenticatedUid}`);
+      throw new Error('Unauthorized: cannot write attendance for another user.');
+    }
+    // Enforce: companyId in the record must match the authenticated user's company
+    if (data.companyId && data.companyId !== authenticatedCompanyId) {
+      console.error(`[Security] Blocked write: record companyId ${data.companyId} !== auth companyId ${authenticatedCompanyId}`);
+      throw new Error('Unauthorized: company mismatch.');
+    }
+    // Enforce: doc ID must follow the deterministic pattern for this user
+    // (prevents writing to another user's doc by guessing their ID)
+    const expectedPrefix = `att_${authenticatedUid}_`;
+    if (!docId.startsWith(expectedPrefix)) {
+      // Allow legacy IDs that were created before the naming convention,
+      // but only if the record's userId matches
+      const existingDoc = await db.collection('attendance').doc(docId).get();
+      if (existingDoc.exists && existingDoc.data().userId !== authenticatedUid) {
+        console.error(`[Security] Blocked write: doc ${docId} belongs to a different user`);
+        throw new Error('Unauthorized: document ownership mismatch.');
+      }
+    }
+    return db.collection('attendance').doc(docId).set(data);
   },
 
   getOfficeSettings: async () => {
@@ -413,7 +470,6 @@ export const storage = {
     try {
       const encodedPath = encodeURIComponent(storagePath);
 
-      // Convert base64 to binary
       const binaryStr = atob(base64);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) {

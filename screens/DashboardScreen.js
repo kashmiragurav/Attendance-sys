@@ -15,8 +15,8 @@ import BottomNavigation from '../components/BottomNavigation';
 import { FeatureGate } from '../components/FeatureGate';
 import Colors, { shadows } from '../constants/Colors';
 import { useAuth } from '../context/AuthContext';
-import { attendanceHelpers } from '../services/firebaseConfig';
-import { formatTime, getTodayAttendance } from '../utils/attendance';
+import { attendanceHelpers, db } from '../services/firebaseConfig';
+import { formatTime } from '../utils/attendance';
 
 const { width } = Dimensions.get('window');
 
@@ -40,10 +40,12 @@ export default function DashboardScreen({ navigation }) {
 
   const loadTodayAttendance = async () => {
     try {
-      const result = await attendanceHelpers.getUserAttendance(user.uid);
-      if (result.success) {
-        const today = getTodayAttendance(result.records);
-        setTodayAttendance(today);
+      const today = new Date().toISOString().split('T')[0];
+      const result = await attendanceHelpers.getTodayAttendanceDoc(user.uid, today);
+      if (result.success && result.data) {
+        setTodayAttendance({ ...result.data, id: result.id });
+      } else {
+        setTodayAttendance(null);
       }
     } catch (error) {
       console.error('Error loading attendance:', error);
