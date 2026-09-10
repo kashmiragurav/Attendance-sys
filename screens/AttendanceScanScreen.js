@@ -107,34 +107,6 @@ export default function AttendanceScanScreen({ navigation, route }) {
         }
     };
 
-    const createAttendanceEvent = ({ type, timestamp, sessionIndex, locationData, photoUrl, source = 'mobile' }) => {
-        const safeLocation = locationData || {};
-        const timestampValue = timestamp || new Date();
-        const eventId = `evt_${user.uid}_${formatDate(timestampValue)}_${type}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-        return {
-            eventId,
-            employeeId: user.employeeId,
-            userId: user.uid,
-            companyId: user.companyId,
-            date: formatDate(timestampValue),
-            type,
-            timestamp: timestampValue,
-            attendanceMode,
-            sessionIndex,
-            latitude: safeLocation.latitude ?? null,
-            longitude: safeLocation.longitude ?? null,
-            accuracy: safeLocation.accuracy ?? null,
-            locationVerified: !!safeLocation.latitude && !!safeLocation.longitude,
-            faceVerified: isFeatureEnabled(FEATURES.FACE_RECOGNITION),
-            wifiVerified: !company?.wifiRestrictionEnabled,
-            photoCaptured: !!photoUrl,
-            photoUrl: photoUrl || null,
-            source,
-            createdAt: new Date().toISOString(),
-        };
-    };
-
     const handleCheckIn = async () => {
         if (loading) return;
         if (isFeatureEnabled(FEATURES.FACE_RECOGNITION)) {
@@ -195,15 +167,6 @@ export default function AttendanceScanScreen({ navigation, route }) {
                 else photoUrl = photoResult.url;
             }
 
-            const attendanceEvent = createAttendanceEvent({
-                type: 'IN',
-                timestamp: now,
-                sessionIndex,
-                locationData,
-                photoUrl,
-                source: 'mobile',
-            });
-
             let attendanceData;
             let attendanceId;
 
@@ -213,7 +176,6 @@ export default function AttendanceScanScreen({ navigation, route }) {
                 const updatedSessions = [
                     ...existingSessions,
                     {
-                        eventId: attendanceEvent.eventId,
                         checkIn: now.toISOString(),
                         checkInTime: formatTime(now),
                         checkOut: null,
@@ -221,8 +183,6 @@ export default function AttendanceScanScreen({ navigation, route }) {
                         sessionHours: 0,
                         location: locationData,
                         checkInPhotoUrl: photoUrl,
-                        attendanceMode,
-                        type: 'IN',
                     },
                 ];
                 const firstCheckIn = updatedSessions[0].checkIn;
@@ -263,7 +223,6 @@ export default function AttendanceScanScreen({ navigation, route }) {
                     status: status.isLate ? 'late' : 'present',
                     workHours: 0,
                     sessions: [{
-                        eventId: attendanceEvent.eventId,
                         checkIn: now.toISOString(),
                         checkInTime: formatTime(now),
                         checkOut: null,
@@ -271,8 +230,6 @@ export default function AttendanceScanScreen({ navigation, route }) {
                         sessionHours: 0,
                         location: locationData,
                         checkInPhotoUrl: photoUrl,
-                        attendanceMode,
-                        type: 'IN',
                     }],
                     isLate: status.isLate,
                     lateMinutes: status.lateMinutes || 0,
@@ -287,7 +244,6 @@ export default function AttendanceScanScreen({ navigation, route }) {
 
             // Write to Firestore with ownership enforcement — only update local state after confirmed write
             await attendanceHelpers.writeAttendanceRecord(user.uid, user.companyId, attendanceId, attendanceData);
-            await db.collection('attendanceEvents').doc(attendanceEvent.eventId).set(attendanceEvent);
             setTodayAttendance(attendanceData);
 
             const sessionNumber = attendanceData.sessions.length;
@@ -373,28 +329,17 @@ export default function AttendanceScanScreen({ navigation, route }) {
 
             const currentSession = freshSessions[currentSessionIndex];
             const sessionHours = (now - new Date(currentSession.checkIn)) / (1000 * 60 * 60);
-            const attendanceEvent = createAttendanceEvent({
-                type: 'OUT',
-                timestamp: now,
-                sessionIndex: currentSessionIndex,
-                locationData,
-                photoUrl,
-                source: 'mobile',
-            });
 
             // Build updated sessions array immutably
             const updatedSessions = freshSessions.map((s, i) =>
                 i === currentSessionIndex
                     ? {
                         ...s,
-                        eventId: s.eventId || attendanceEvent.eventId,
                         checkOut: now.toISOString(),
                         checkOutTime: formatTime(now),
                         sessionHours: parseFloat(sessionHours.toFixed(2)),
                         checkoutLocation: locationData,
                         checkOutPhotoUrl: photoUrl,
-                        type: 'OUT',
-                        attendanceMode,
                     }
                     : s
             );
@@ -426,7 +371,6 @@ export default function AttendanceScanScreen({ navigation, route }) {
 
             // Write with ownership enforcement — only update local state after confirmed write
             await attendanceHelpers.writeAttendanceRecord(user.uid, user.companyId, freshRecord.id, updatedAttendance);
-            await db.collection('attendanceEvents').doc(attendanceEvent.eventId).set(attendanceEvent);
             setTodayAttendance(updatedAttendance);
 
             const sessionNumber = currentSessionIndex + 1;

@@ -1,12 +1,3 @@
-import { initializeApp } from 'firebase/app';
-import {
-  getAuth,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut as firebaseSignOut,
-} from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-
 // Firebase REST API Integration - No SDK needed!
 // Project: attendance-3519f
 // This uses Firebase Firestore REST API directly
@@ -15,36 +6,9 @@ const PROJECT_ID = 'attendance-3519f';
 const API_KEY = 'AIzaSyAn8PQG85atGyDptxCMBj_LgKug-Sfd7nQ';
 const BASE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
-const firebaseConfig = {
-  apiKey: API_KEY,
-  authDomain: 'attendance-3519f.firebaseapp.com',
-  projectId: PROJECT_ID,
-  messagingSenderId: '354209684908',
-  appId: '1:354209684908:web:9fe6d5791232a58e33ee09',
-};
-
-const firebaseApp = initializeApp(firebaseConfig);
-export const firebaseAuth = getAuth(firebaseApp);
-export const firebaseDb = getFirestore(firebaseApp);
-
-export const firebaseAuthService = {
-  getCurrentUser: () => firebaseAuth.currentUser,
-  onAuthStateChanged: (callback) => onAuthStateChanged(firebaseAuth, callback),
-  signInWithEmail: async (email, password) => {
-    const credential = await signInWithEmailAndPassword(firebaseAuth, email, password);
-    return credential.user;
-  },
-  signOut: async () => {
-    await firebaseSignOut(firebaseAuth);
-  },
-};
-
 // Helper function to convert data to Firestore format
 const toFirestoreValue = (value) => {
   if (value === undefined) return { nullValue: null };
-  if (value instanceof Date) {
-    return { timestampValue: value.toISOString() };
-  }
   if (typeof value === 'string') return { stringValue: value };
   if (typeof value === 'number') {
     return Number.isInteger(value)
@@ -78,10 +42,6 @@ const toFirestoreValue = (value) => {
 // Helper function to convert Firestore format back to JS
 const fromFirestoreValue = (firestoreValue) => {
   if (!firestoreValue) return null;
-  if (firestoreValue.timestampValue !== undefined) {
-    const parsed = new Date(firestoreValue.timestampValue);
-    return Number.isNaN(parsed.getTime()) ? firestoreValue.timestampValue : parsed;
-  }
   if (firestoreValue.stringValue !== undefined) return firestoreValue.stringValue;
   if (firestoreValue.integerValue !== undefined) return parseInt(firestoreValue.integerValue);
   if (firestoreValue.doubleValue !== undefined) return typeof firestoreValue.doubleValue === 'string' ? parseFloat(firestoreValue.doubleValue) : firestoreValue.doubleValue;
@@ -494,8 +454,47 @@ export const attendanceHelpers = {
 
 export const auth = {
   currentUser: null,
-  signOut: async () => {
-    await firebaseAuthService.signOut();
+  signOut: () => Promise.resolve(),
+};
+
+const STORAGE_BASE_URL = `https://firebasestorage.googleapis.com/v0/b/${PROJECT_ID}.appspot.com/o`;
+
+export const storage = {
+  /**
+   * Upload a base64 JPEG to Firebase Storage.
+   * @param {string} storagePath - e.g. "attendance_photos/comp_1/user_1/2025-01-01/0_check-in.jpg"
+   * @param {string} base64 - raw base64 string (no data URI prefix)
+   * @returns {Promise<{ok: boolean, url?: string, error?: string}>}
+   */
+  uploadBase64: async (storagePath, base64) => {
+    try {
+      const encodedPath = encodeURIComponent(storagePath);
+
+      const binaryStr = atob(base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const uploadRes = await fetch(
+        `${STORAGE_BASE_URL}?uploadType=media&name=${encodedPath}&key=${API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'image/jpeg' },
+          body: bytes,
+        }
+      );
+
+      if (!uploadRes.ok) {
+        const text = await uploadRes.text();
+        return { ok: false, error: `Upload failed: HTTP ${uploadRes.status} — ${text}` };
+      }
+
+      const url = `${STORAGE_BASE_URL}/${encodedPath}?alt=media&key=${API_KEY}`;
+      return { ok: true, url };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   },
 };
 
@@ -504,5 +503,6 @@ console.log('✅ Firestore REST API initialized for attendance-3519f');
 export default {
   auth,
   db,
+  storage,
   attendanceHelpers,
 };

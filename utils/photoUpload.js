@@ -1,19 +1,34 @@
+import { storage } from '../services/firebaseConfig';
+
 /**
- * Keep attendance photo capture working without requiring Firebase Storage.
+ * Builds the storage path for an attendance photo.
+ * Format: attendance_photos/{companyId}/{userId}/{date}/{sessionIndex}_{action}.jpg
  *
- * The current app does not have a suitable persistent non-Storage photo mechanism,
- * so the smallest safe compatibility fix is to retain a local in-memory data URI
- * for the current punch flow. This preserves the existing UI and punch flow while
- * avoiding any Firebase Storage dependency for attendance evidence.
+ * Using sessionIndex in the filename ensures photos from different sessions on the
+ * same day never overwrite each other, and check-in vs check-out are distinct.
  */
-export const uploadAttendancePhoto = async ({ base64 }) => {
+const buildPath = (companyId, userId, date, sessionIndex, action) =>
+    `attendance_photos/${companyId}/${userId}/${date}/${sessionIndex}_${action}.jpg`;
+
+/**
+ * Upload an attendance photo to Firebase Storage.
+ *
+ * @param {object} params
+ * @param {string} params.companyId
+ * @param {string} params.userId
+ * @param {string} params.date        - YYYY-MM-DD
+ * @param {number} params.sessionIndex - 0-based index of the attendance session
+ * @param {string} params.action      - 'check-in' | 'check-out'
+ * @param {string} params.base64      - raw base64 JPEG (no data URI prefix)
+ * @returns {Promise<{ok: boolean, url?: string, error?: string}>}
+ *
+ * Never throws — callers can treat a failed upload as non-fatal.
+ */
+export const uploadAttendancePhoto = async ({ companyId, userId, date, sessionIndex, action, base64 }) => {
     try {
         if (!base64) return { ok: false, error: 'No image data' };
-        const cleanBase64 = String(base64).replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '');
-        return {
-            ok: true,
-            url: `data:image/jpeg;base64,${cleanBase64}`,
-        };
+        const path = buildPath(companyId, userId, date, sessionIndex, action);
+        return await storage.uploadBase64(path, base64);
     } catch (err) {
         return { ok: false, error: err.message };
     }

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useEffect, useState } from 'react';
 import { FEATURES, PLAN_DEFAULTS } from '../constants/Plans';
-import { attendanceHelpers, db, firebaseAuthService } from '../services/firebaseConfig';
+import { attendanceHelpers, db } from '../services/firebaseConfig';
 import { getUserLimit, isFeatureEnabled } from '../utils/featureAccess';
 
 export const AuthContext = createContext();
@@ -56,52 +56,7 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = firebaseAuthService.onAuthStateChanged(async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-          const firebaseUid = firebaseUser.uid;
-          let userDoc = await db.collection('users').doc(firebaseUid).get();
-
-          if (!userDoc.exists) {
-            const byEmail = await attendanceHelpers.getUserByEmail(firebaseUser.email || '');
-            if (byEmail.success) {
-              const legacyUser = byEmail.user;
-              const mergedUser = {
-                ...legacyUser,
-                uid: firebaseUid,
-                firebaseUid,
-                updatedAt: new Date().toISOString(),
-              };
-              await db.collection('users').doc(firebaseUid).set(mergedUser);
-              userDoc = { exists: true, data: () => mergedUser };
-            }
-          }
-
-          if (userDoc.exists) {
-            const userData = userDoc.data();
-            setUser(userData);
-            setIsAuthenticated(true);
-
-            if (userData.companyId) {
-              const compDoc = await db.collection('companies').doc(userData.companyId).get();
-              if (compDoc.exists) {
-                setCompany(compDoc.data());
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Firebase auth restore failed:', error);
-        }
-      }
-
-      if (!firebaseUser) {
-        checkStoredAuth();
-      }
-
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    checkStoredAuth();
   }, []);
 
   // Real-time listener for company data
@@ -295,53 +250,34 @@ export const AuthProvider = ({ children }) => {
         throw new Error('Please enter credentials');
       }
 
+      // Normalize and Trim inputs - Remove ALL spaces from IDs
       const trimmedIdentifier = identifier.trim().replace(/\s/g, '');
       const trimmedPassword = password.trim();
+
       let normalizedIdentifier = trimmedIdentifier.includes('@') ? trimmedIdentifier.toLowerCase() : trimmedIdentifier.toUpperCase();
 
+      // Auto-prefix EMP if missing for employee IDs (since it's enforced during registration)
+      // Now more robust: check if it's just numbers
       if (!normalizedIdentifier.includes('@') && !normalizedIdentifier.startsWith('EMP') && /^\d+$/.test(normalizedIdentifier)) {
         console.log(`ℹ️ Auto-prefixing EMP to ID: ${normalizedIdentifier}`);
         normalizedIdentifier = 'EMP' + normalizedIdentifier;
       }
 
+      console.log(`🔍 Attempting login: [${normalizedIdentifier}] ${passedCompanySlug ? `(Company Slug: ${passedCompanySlug})` : ''}`);
+
       let foundUser = null;
 
       if (normalizedIdentifier.includes('@')) {
-        try {
-          const firebaseCredential = await firebaseAuthService.signInWithEmail(normalizedIdentifier, trimmedPassword);
-          const firebaseUid = firebaseCredential.uid;
-          let userDoc = await db.collection('users').doc(firebaseUid).get();
-
-          if (!userDoc.exists) {
-            const userResult = await attendanceHelpers.getUserByEmail(normalizedIdentifier);
-            if (userResult.success) {
-              const legacyUser = {
-                ...userResult.user,
-                uid: firebaseUid,
-                firebaseUid,
-                updatedAt: new Date().toISOString(),
-              };
-              await db.collection('users').doc(firebaseUid).set(legacyUser);
-              userDoc = { exists: true, data: () => legacyUser };
-            }
-          }
-
-          if (userDoc.exists) {
-            const userData = userDoc.data();
-            if (!userData.isActive) {
-              throw new Error('Account is deactivated. Please contact HR.');
-            }
-            foundUser = userData;
+        // Email Login (Emails are globally unique)
+        const userResult = await attendanceHelpers.getUserByEmail(normalizedIdentifier);
+        if (userResult.success) {
+          if (verifySimpleHash(trimmedPassword, userResult.user.passwordHash, userResult.user.plainPassword)) {
+            foundUser = userResult.user;
           } else {
-            throw new Error('No employee record found for this authenticated account.');
+            console.log('❌ Password mismatch for email login');
           }
-        } catch (firebaseError) {
-          const legacyUserResult = await attendanceHelpers.getUserByEmail(normalizedIdentifier);
-          if (legacyUserResult.success && verifySimpleHash(trimmedPassword, legacyUserResult.user.passwordHash, legacyUserResult.user.plainPassword)) {
-            foundUser = legacyUserResult.user;
-          } else {
-            throw firebaseError;
-          }
+        } else {
+          console.log(`❌ User not found with email: ${normalizedIdentifier}`);
         }
       } else if (passedCompanySlug) {
         // Employee ID + Company Slug Login
@@ -441,19 +377,7 @@ export const AuthProvider = ({ children }) => {
       });
 
       await AsyncStorage.setItem('userToken', token);
-      if (firebaseAuthService.getCurrentUser() && foundUser.email && foundUser.email.toLowerCase() === firebaseAuthService.getCurrentUser().email?.toLowerCase()) {
-        const syncedUser = {
-          ...foundUser,
-          uid: foundUser.uid || firebaseAuthService.getCurrentUser().uid,
-          firebaseUid: firebaseAuthService.getCurrentUser().uid,
-          updatedAt: new Date().toISOString(),
-        };
-        await db.collection('users').doc(syncedUser.uid).set(syncedUser);
-        setUser(syncedUser);
-        foundUser = syncedUser;
-      } else {
-        setUser(foundUser);
-      }
+      setUser(foundUser);
 
       // Fetch and set company data
       if (foundUser.companyId) {
@@ -480,11 +404,6 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       setError(null);
-      try {
-        await firebaseAuthService.signOut();
-      } catch (firebaseLogoutError) {
-        console.warn('Firebase logout warning:', firebaseLogoutError);
-      }
       await AsyncStorage.removeItem('userToken');
       setUser(null);
       setCompany(null);
