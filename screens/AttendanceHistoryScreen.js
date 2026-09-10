@@ -40,6 +40,11 @@ export default function AttendanceHistoryScreen({ navigation }) {
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1); // 1-12
 
     useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', loadAttendanceHistory);
+        return unsubscribe;
+    }, [navigation]);
+
+    useEffect(() => {
         loadAttendanceHistory();
     }, [currentDate]);
 
@@ -49,7 +54,6 @@ export default function AttendanceHistoryScreen({ navigation }) {
             const snapshot = await db.collection('attendance')
                 .where('userId', '==', user.uid);
 
-            // Filter by companyId manually since current wrapper doesn't support chained .where()
             const userRecords = snapshot.docs
                 .map(doc => doc.data())
                 .filter(record => record.companyId === user.companyId || !record.companyId);

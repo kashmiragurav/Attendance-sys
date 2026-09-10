@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Dimensions,
   ScrollView,
@@ -15,8 +15,8 @@ import BottomNavigation from '../components/BottomNavigation';
 import { FeatureGate } from '../components/FeatureGate';
 import Colors, { shadows } from '../constants/Colors';
 import { useAuth } from '../context/AuthContext';
-import { attendanceHelpers } from '../services/firebaseConfig';
-import { formatTime, getTodayAttendance } from '../utils/attendance';
+import { attendanceHelpers, db } from '../services/firebaseConfig';
+import { formatTime } from '../utils/attendance';
 
 const { width } = Dimensions.get('window');
 
@@ -24,12 +24,6 @@ export default function DashboardScreen({ navigation }) {
   const { user, isFeatureEnabled, FEATURES, refreshCompany } = useAuth();
   const [todayAttendance, setTodayAttendance] = useState(null);
   const [isWFH, setIsWFH] = useState(false);
-
-  useEffect(() => {
-    loadTodayAttendance();
-    // Refresh company data (permissions) on mount
-    if (refreshCompany) refreshCompany();
-  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -40,10 +34,12 @@ export default function DashboardScreen({ navigation }) {
 
   const loadTodayAttendance = async () => {
     try {
-      const result = await attendanceHelpers.getUserAttendance(user.uid);
-      if (result.success) {
-        const today = getTodayAttendance(result.records);
-        setTodayAttendance(today);
+      const today = new Date().toISOString().split('T')[0];
+      const result = await attendanceHelpers.getTodayAttendanceDoc(user.uid, today);
+      if (result.success && result.data) {
+        setTodayAttendance({ ...result.data, id: result.id });
+      } else {
+        setTodayAttendance(null);
       }
     } catch (error) {
       console.error('Error loading attendance:', error);

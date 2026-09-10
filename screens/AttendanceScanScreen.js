@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useAuth } from '../context/AuthContext';
-import { db } from '../services/firebaseConfig';
+import { db, attendanceHelpers } from '../services/firebaseConfig';
 import { formatDate, formatTime, calculateAttendanceStatus, isAttendanceMarkedToday } from '../utils/attendance';
 import { resolveConfig } from '../utils/attendanceConfig';
 import { checkAttendanceLocation } from '../utils/locationValidator';
@@ -35,28 +35,23 @@ export default function AttendanceScanScreen({ navigation, route }) {
         loadData();
     }, []);
 
+    // Re-load when screen comes back into focus (e.g. returning from face scan)
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', loadData);
+        return unsubscribe;
+    }, [navigation]);
+
     const loadData = async () => {
         try {
             setLoading(true);
-
-            // Load office settings
-            const settingsDoc = await db.collection('office_settings').doc('settings_default').get();
-            const settings = settingsDoc.exists ? resolveConfig(settingsDoc.data()) : resolveConfig(null);
-            setOfficeSettings(settings);
-
-            // Load today's attendance
-            const today = formatDate(new Date());
-            const attendanceSnapshot = await db.collection('attendance').getDocs();
-            const todayRecord = attendanceSnapshot.docs.find(doc => {
-                const docData = doc.data();
-                const docUserId = docData.userId;
-                return typeof docUserId === 'string' && typeof user.uid === 'string'
-                    ? docUserId.toLowerCase() === user.uid.toLowerCase() && docData.date === today
-                    : docUserId === user.uid && docData.date === today;
-            });
-
-            if (todayRecord) {
-                setTodayAttendance(todayRecord.data());
+            const [settingsDoc, todayResult] = await Promise.all([
+                db.collection('office_settings').doc('settings_default').get(),
+                attendanceHelpers.getTodayAttendanceDoc(user.uid, formatDate(new Date())),
+            ]);
+            setOfficeSettings(settingsDoc.exists ? resolveConfig(settingsDoc.data()) : resolveConfig(null));
+            if (todayResult.success && todayResult.data) {
+                // Ensure the local record always carries its Firestore doc ID
+                setTodayAttendance({ ...todayResult.data, id: todayResult.id });
             }
         } catch (error) {
             console.error('Error loading data:', error);
@@ -137,7 +132,7 @@ export default function AttendanceScanScreen({ navigation, route }) {
     };
 
     const performCheckIn = async (locationData) => {
-        if (loading) return; // prevent double-click
+        if (loading) return;
         try {
             setLoading(true);
 
@@ -145,17 +140,23 @@ export default function AttendanceScanScreen({ navigation, route }) {
             const today = formatDate(now);
             const settings = officeSettings || getDefaultSettings();
 
-            // Block if there is an active (unclosed) session
-            const sessions = todayAttendance?.sessions || [];
-            const hasActiveSession = sessions.some(s => s.checkIn && !s.checkOut);
+            // Always re-read from Firestore to avoid stale-state race conditions
+            const freshResult = await attendanceHelpers.getTodayAttendanceDoc(user.uid, today);
+            const freshRecord = freshResult.success && freshResult.data
+                ? { ...freshResult.data, id: freshResult.id }
+                : null;
+
+            // Block if there is an active (unclosed) session in the fresh record
+            const existingSessions = freshRecord?.sessions || [];
+            const hasActiveSession = existingSessions.some(s => s.checkIn && !s.checkOut);
             if (hasActiveSession) {
                 Alert.alert('Active Session', 'Please check-out first before starting a new session.');
+                setLoading(false);
                 return;
             }
 
-            // Capture photo non-blocking — attendance proceeds even if photo is skipped/fails
+            const sessionIndex = existingSessions.length;
             const base64 = await captureAttendancePhoto();
-            const sessionIndex = sessions.length; // index of the session being created
             let photoUrl = null;
             if (base64) {
                 const photoResult = await uploadAttendancePhoto({
@@ -173,38 +174,31 @@ export default function AttendanceScanScreen({ navigation, route }) {
             let attendanceData;
             let attendanceId;
 
-            if (todayAttendance) {
-                // Update existing record with new session
-                attendanceId = todayAttendance.id;
-
-                // Initialize sessions array if not exists
-                const sessions = todayAttendance.sessions || [];
-
-                // Add new session
-                const newSession = {
+            if (freshRecord) {
+                attendanceId = freshRecord.id;
+                // Build new sessions array immutably — never mutate state
+                const updatedSessions = [
+                    ...existingSessions,
+                    {
+                        checkIn: now.toISOString(),
+                        checkInTime: formatTime(now),
+                        checkOut: null,
+                        checkOutTime: null,
+                        sessionHours: 0,
+                        location: locationData,
+                        checkInPhotoUrl: photoUrl,
+                    },
+                ];
+                const firstCheckIn = updatedSessions[0].checkIn;
+                const status = calculateAttendanceStatus(firstCheckIn, null, settings);
+                attendanceData = {
+                    ...freshRecord,
+                    companyId: user.companyId,
                     checkIn: now.toISOString(),
                     checkInTime: formatTime(now),
                     checkOut: null,
                     checkOutTime: null,
-                    sessionHours: 0,
-                    location: locationData,
-                    checkInPhotoUrl: photoUrl,
-                };
-
-                sessions.push(newSession);
-
-                // Calculate first check-in status (for late detection)
-                const firstCheckIn = sessions[0].checkIn;
-                const status = calculateAttendanceStatus(firstCheckIn, null, settings);
-
-                attendanceData = {
-                    ...todayAttendance,
-                    companyId: user.companyId, // Ensure companyId is present
-                    checkIn: now.toISOString(), // Update to latest check-in
-                    checkInTime: formatTime(now),
-                    checkOut: null, // Reset check-out
-                    checkOutTime: null,
-                    sessions: sessions,
+                    sessions: updatedSessions,
                     isLate: status.isLate,
                     lateMinutes: status.lateMinutes || 0,
                     method: isFeatureEnabled(FEATURES.FACE_RECOGNITION) ? 'face_scan' : 'geo_location',
@@ -252,9 +246,8 @@ export default function AttendanceScanScreen({ navigation, route }) {
                 };
             }
 
-            // Save to Firestore
-            await db.collection('attendance').doc(attendanceId).set(attendanceData);
-
+            // Write to Firestore with ownership enforcement — only update local state after confirmed write
+            await attendanceHelpers.writeAttendanceRecord(user.uid, user.companyId, attendanceId, attendanceData);
             setTodayAttendance(attendanceData);
 
             const sessionNumber = attendanceData.sessions.length;
@@ -297,23 +290,34 @@ export default function AttendanceScanScreen({ navigation, route }) {
     };
 
     const performCheckOut = async (locationData) => {
-        if (loading) return; // prevent double-click
+        if (loading) return;
         try {
             setLoading(true);
-
-            const sessions = todayAttendance?.sessions || [];
-            const currentSessionIndex = sessions.findIndex(s => s.checkIn && !s.checkOut);
-
-            if (!todayAttendance || currentSessionIndex === -1) {
-                Alert.alert('No Active Session', 'Please check-in first before checking out.');
-                return;
-            }
 
             const now = new Date();
             const today = formatDate(now);
             const settings = officeSettings || getDefaultSettings();
 
-            // Capture photo non-blocking
+            // Re-read from Firestore to get the authoritative current state
+            const freshResult = await attendanceHelpers.getTodayAttendanceDoc(user.uid, today);
+            const freshRecord = freshResult.success && freshResult.data
+                ? { ...freshResult.data, id: freshResult.id }
+                : null;
+
+            if (!freshRecord) {
+                Alert.alert('No Active Session', 'Please check-in first before checking out.');
+                setLoading(false);
+                return;
+            }
+
+            const freshSessions = freshRecord.sessions || [];
+            const currentSessionIndex = freshSessions.findIndex(s => s.checkIn && !s.checkOut);
+            if (currentSessionIndex === -1) {
+                Alert.alert('No Active Session', 'Please check-in first before checking out.');
+                setLoading(false);
+                return;
+            }
+
             const base64 = await captureAttendancePhoto();
             let photoUrl = null;
             if (base64) {
@@ -329,45 +333,38 @@ export default function AttendanceScanScreen({ navigation, route }) {
                 else photoUrl = photoResult.url;
             }
 
-            // Update current session with check-out
-            const currentSession = sessions[currentSessionIndex];
-            const sessionCheckInTime = new Date(currentSession.checkIn);
-            const sessionHours = (now - sessionCheckInTime) / (1000 * 60 * 60);
+            const currentSession = freshSessions[currentSessionIndex];
+            const sessionHours = (now - new Date(currentSession.checkIn)) / (1000 * 60 * 60);
 
-            sessions[currentSessionIndex] = {
-                ...currentSession,
-                checkOut: now.toISOString(),
-                checkOutTime: formatTime(now),
-                sessionHours: parseFloat(sessionHours.toFixed(2)),
-                checkoutLocation: locationData,
-                checkOutPhotoUrl: photoUrl,
-            };
+            // Build updated sessions array immutably
+            const updatedSessions = freshSessions.map((s, i) =>
+                i === currentSessionIndex
+                    ? {
+                        ...s,
+                        checkOut: now.toISOString(),
+                        checkOutTime: formatTime(now),
+                        sessionHours: parseFloat(sessionHours.toFixed(2)),
+                        checkoutLocation: locationData,
+                        checkOutPhotoUrl: photoUrl,
+                    }
+                    : s
+            );
 
-            // Calculate total work hours from all sessions
-            const totalWorkHours = sessions.reduce((total, session) => {
-                return total + (session.sessionHours || 0);
-            }, 0);
-
-            // Get first check-in time for status calculation
-            const firstCheckIn = new Date(sessions[0].checkIn);
-
-            // Total break minutes across all completed breaks
-            const totalBreakMinutes = getTotalBreakMinutes(todayAttendance.breaks || []);
-
-            // Calculate final status based on first check-in and total hours
+            const totalWorkHours = updatedSessions.reduce((t, s) => t + (s.sessionHours || 0), 0);
+            const firstCheckIn = new Date(updatedSessions[0].checkIn);
+            const totalBreakMinutes = getTotalBreakMinutes(freshRecord.breaks || []);
             const status = calculateAttendanceStatus(firstCheckIn, now, {
                 ...settings,
                 workHours: totalWorkHours,
                 totalBreakMinutes,
             });
 
-            // Update attendance record
             const updatedAttendance = {
-                ...todayAttendance,
+                ...freshRecord,
                 companyId: user.companyId,
                 checkOut: now.toISOString(),
                 checkOutTime: formatTime(now),
-                sessions: sessions,
+                sessions: updatedSessions,
                 workHours: parseFloat(totalWorkHours.toFixed(2)),
                 totalBreakMinutes,
                 status: status.status,
@@ -378,8 +375,8 @@ export default function AttendanceScanScreen({ navigation, route }) {
                 updatedAt: now.toISOString(),
             };
 
-            await db.collection('attendance').doc(todayAttendance.id).set(updatedAttendance);
-
+            // Write with ownership enforcement — only update local state after confirmed write
+            await attendanceHelpers.writeAttendanceRecord(user.uid, user.companyId, freshRecord.id, updatedAttendance);
             setTodayAttendance(updatedAttendance);
 
             const sessionNumber = currentSessionIndex + 1;
@@ -443,6 +440,20 @@ export default function AttendanceScanScreen({ navigation, route }) {
         }
         try {
             setBreakLoading(true);
+            // Re-read from Firestore before writing to avoid stale break array
+            const today = formatDate(new Date());
+            const freshResult = await attendanceHelpers.getTodayAttendanceDoc(user.uid, today);
+            if (!freshResult.success || !freshResult.data) {
+                Alert.alert('Error', 'Could not load attendance record.');
+                return;
+            }
+            const freshRecord = { ...freshResult.data, id: freshResult.id };
+            const freshBreaks = freshRecord.breaks || [];
+            // Re-validate against fresh data
+            if (freshBreaks.some(b => b.start && !b.end)) {
+                Alert.alert('Break Active', 'You already have an active break. End it first.');
+                return;
+            }
             const now = new Date();
             const newBreak = {
                 start: now.toISOString(),
@@ -450,14 +461,14 @@ export default function AttendanceScanScreen({ navigation, route }) {
                 end: null,
                 endTime: null,
                 durationMinutes: 0,
-                sessionIndex: todayAttendance.sessions.indexOf(activeSession),
+                sessionIndex: (freshRecord.sessions || []).findIndex(s => s.checkIn && !s.checkOut),
             };
-            const updatedBreaks = [...breaks, newBreak];
-            const updated = { ...todayAttendance, breaks: updatedBreaks, updatedAt: now.toISOString() };
-            await db.collection('attendance').doc(todayAttendance.id).set(updated);
+            const updated = { ...freshRecord, breaks: [...freshBreaks, newBreak], updatedAt: now.toISOString() };
+            await attendanceHelpers.writeAttendanceRecord(user.uid, user.companyId, freshRecord.id, updated);
             setTodayAttendance(updated);
             Alert.alert('Break Started ☕', `Break started at ${formatTime(now)}`);
         } catch (e) {
+            console.error('Break start error:', e);
             Alert.alert('Error', 'Failed to start break.');
         } finally {
             setBreakLoading(false);
@@ -473,22 +484,37 @@ export default function AttendanceScanScreen({ navigation, route }) {
         }
         try {
             setBreakLoading(true);
+            // Re-read from Firestore before writing
+            const today = formatDate(new Date());
+            const freshResult = await attendanceHelpers.getTodayAttendanceDoc(user.uid, today);
+            if (!freshResult.success || !freshResult.data) {
+                Alert.alert('Error', 'Could not load attendance record.');
+                return;
+            }
+            const freshRecord = { ...freshResult.data, id: freshResult.id };
+            const freshBreaks = freshRecord.breaks || [];
+            const freshActiveBreak = freshBreaks.find(b => b.start && !b.end);
+            if (!freshActiveBreak) {
+                Alert.alert('No Active Break', 'No break is currently active.');
+                return;
+            }
             const now = new Date();
-            const durationMinutes = Math.round((now - new Date(activeBreak.start)) / 60000);
             const settings = officeSettings || getDefaultSettings();
-            const totalUsedBefore = getTotalBreakMinutes(todayAttendance.breaks || []);
+            const durationMinutes = Math.round((now - new Date(freshActiveBreak.start)) / 60000);
+            const totalUsedBefore = getTotalBreakMinutes(freshBreaks);
             const allowed = settings.maxBreakMinutes || 60;
             const cappedDuration = Math.min(durationMinutes, allowed - totalUsedBefore);
-            const breaks = (todayAttendance.breaks || []).map(b =>
-                b === activeBreak
+            const updatedBreaks = freshBreaks.map(b =>
+                b === freshActiveBreak
                     ? { ...b, end: now.toISOString(), endTime: formatTime(now), durationMinutes: cappedDuration }
                     : b
             );
-            const updated = { ...todayAttendance, breaks, updatedAt: now.toISOString() };
-            await db.collection('attendance').doc(todayAttendance.id).set(updated);
+            const updated = { ...freshRecord, breaks: updatedBreaks, updatedAt: now.toISOString() };
+            await attendanceHelpers.writeAttendanceRecord(user.uid, user.companyId, freshRecord.id, updated);
             setTodayAttendance(updated);
             Alert.alert('Break Ended ✅', `Break duration: ${cappedDuration} min`);
         } catch (e) {
+            console.error('Break end error:', e);
             Alert.alert('Error', 'Failed to end break.');
         } finally {
             setBreakLoading(false);

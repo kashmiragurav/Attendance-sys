@@ -27,6 +27,7 @@ import { acquireLocation, validateGeoFence } from '../utils/locationValidator';
 import { uploadAttendancePhoto } from '../utils/photoUpload';
 import { validateWifi } from '../utils/wifiValidator';
 import { faceDetectorSettings, isNativeDetectorAvailable } from '../utils/faceRecognition';
+import { attendanceHelpers } from '../services/firebaseConfig';
 
 export default function RealTimeFaceScanScreen({ navigation, route }) {
     const { user, isFeatureEnabled, FEATURES, updateProfile, company } = useAuth();
@@ -326,11 +327,11 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
             const now = new Date();
             const today = formatDate(now);
 
-            const docs = (await db.collection('attendance').getDocs()).docs || [];
-            const todayRecord = docs.find(doc => {
-                const d = doc.data();
-                return d.userId === user.uid && d.date === today;
-            });
+            // Always read from Firestore by deterministic doc ID — avoids full scan and cross-tenant leak
+            const freshResult = await attendanceHelpers.getTodayAttendanceDoc(user.uid, today);
+            const todayRecord = freshResult.success && freshResult.data
+                ? { id: freshResult.id, data: () => freshResult.data }
+                : null;
 
             if (action === 'check-in') {
                 const attendanceId = todayRecord ? todayRecord.id : `att_${user.uid}_${today}`;
@@ -387,7 +388,7 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                     updatedAt: now.toISOString(),
                 };
 
-                await db.collection('attendance').doc(attendanceId).set(attendanceData);
+                await attendanceHelpers.writeAttendanceRecord(user.uid, user.companyId, attendanceId, attendanceData);
             } else {
                 // Check-out
                 if (!todayRecord || !todayRecord.data().checkIn) {
@@ -398,11 +399,11 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                 const sessions = Array.isArray(data.sessions) ? [...data.sessions] : [];
                 const currentSessionIndex = sessions.findIndex(s => !s.checkOut);
 
+                let updatedSessions;
                 if (currentSessionIndex !== -1) {
                     const currentSession = sessions[currentSessionIndex];
                     const sessionHours = (now - new Date(currentSession.checkIn)) / (1000 * 60 * 60);
 
-                    // Upload photo non-blocking
                     const photoResult = await uploadAttendancePhoto({
                         companyId: user.companyId,
                         userId: user.uid,
@@ -413,14 +414,19 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                     });
                     if (!photoResult.ok) console.warn('[Photo] Upload failed:', photoResult.error);
 
-                    sessions[currentSessionIndex] = {
-                        ...currentSession,
-                        checkOut: now.toISOString(),
-                        checkOutTime: formatTime(now),
-                        sessionHours: parseFloat(sessionHours.toFixed(2)),
-                        checkoutLocation: location,
-                        checkOutPhotoUrl: photoResult.url || null,
-                    };
+                    // Build immutably — never mutate the array from Firestore
+                    updatedSessions = sessions.map((s, i) =>
+                        i === currentSessionIndex
+                            ? {
+                                ...s,
+                                checkOut: now.toISOString(),
+                                checkOutTime: formatTime(now),
+                                sessionHours: parseFloat(sessionHours.toFixed(2)),
+                                checkoutLocation: location,
+                                checkOutPhotoUrl: photoResult.url || null,
+                            }
+                            : s
+                    );
                 } else {
                     // No open session — synthesise one from the top-level checkIn
                     const mainCheckInTime = new Date(data.checkIn);
@@ -436,31 +442,34 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                     });
                     if (!photoResult.ok) console.warn('[Photo] Upload failed:', photoResult.error);
 
-                    sessions.push({
-                        checkIn: data.checkIn,
-                        checkInTime: data.checkInTime || formatTime(mainCheckInTime),
-                        checkOut: now.toISOString(),
-                        checkOutTime: formatTime(now),
-                        sessionHours: parseFloat(sessionHours.toFixed(2)),
-                        location: data.location || null,
-                        checkoutLocation: location,
-                        checkOutPhotoUrl: photoResult.url || null,
-                    });
+                    updatedSessions = [
+                        ...sessions,
+                        {
+                            checkIn: data.checkIn,
+                            checkInTime: data.checkInTime || formatTime(mainCheckInTime),
+                            checkOut: now.toISOString(),
+                            checkOutTime: formatTime(now),
+                            sessionHours: parseFloat(sessionHours.toFixed(2)),
+                            location: data.location || null,
+                            checkoutLocation: location,
+                            checkOutPhotoUrl: photoResult.url || null,
+                        },
+                    ];
                 }
 
-                const totalWorkHours = sessions.reduce((t, s) => t + (s.sessionHours || 0), 0);
-                const firstCheckIn = new Date(sessions[0].checkIn);
+                const totalWorkHours = updatedSessions.reduce((t, s) => t + (s.sessionHours || 0), 0);
+                const firstCheckIn = new Date(updatedSessions[0].checkIn);
                 const status = calculateAttendanceStatus(firstCheckIn, now, {
                     ...resolveConfig(officeSettings),
                     workHours: totalWorkHours,
                 });
 
-                await db.collection('attendance').doc(todayRecord.id).set({
+                await attendanceHelpers.writeAttendanceRecord(user.uid, user.companyId, todayRecord.id, {
                     ...data,
                     companyId: user.companyId,
                     checkOut: now.toISOString(),
                     checkOutTime: formatTime(now),
-                    sessions,
+                    sessions: updatedSessions,
                     workHours: parseFloat(totalWorkHours.toFixed(2)),
                     status: status.status,
                     checkoutLocation: location,

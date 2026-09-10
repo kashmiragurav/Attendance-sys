@@ -128,12 +128,12 @@ export default function AdminDashboardScreen({ navigation }) {
 
     const handleLogout = () => {
         Alert.alert(
-            'Confirm Logout',
             'Are you sure you want to logout?',
+            '',
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
-                    text: 'Confirm Logout',
+                    text: 'Logout',
                     style: 'destructive',
                     onPress: async () => { await logout(); }
                 }

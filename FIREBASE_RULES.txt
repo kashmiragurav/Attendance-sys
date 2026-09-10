@@ -1,14 +1,50 @@
-# Firebase Firestore Security Rules
-# Complete RBAC implementation for Attendance Management System
-# Deploy this to your Firebase Console
+# Firebase Security Architecture
+# Project: attendance-3519f
+#
+# IMPORTANT: This app uses the Firestore REST API with an API key only.
+# Firebase Auth tokens are NOT used, so Firestore security rules below
+# are NOT enforced by Firebase on incoming requests.
+#
+# App-level security boundaries (enforced in code):
+#
+# 1. writeAttendanceRecord() in firebaseConfig.js:
+#    - Rejects writes where record.userId !== authenticated user's uid
+#    - Rejects writes where record.companyId !== authenticated user's companyId
+#    - Rejects writes to doc IDs that belong to a different user
+#
+# 2. AdminEditAttendanceScreen.handleSave():
+#    - Verifies record.companyId === admin's companyId before any write
+#    - Uses admin's verified companyId on new records (not client-supplied)
+#
+# 3. All attendance reads use getTodayAttendanceDoc(userId, date):
+#    - Reads by deterministic doc ID att_{userId}_{date}
+#    - No cross-tenant data is fetched
+#
+# 4. getUserAttendance(userId) uses where('userId', '==', userId):
+#    - Scoped to the authenticated user's own records
+#
+# 5. Admin queries use where('companyId', '==', user.companyId):
+#    - Scoped to the admin's own company
+#
+# 6. Role routing in App.js:
+#    - SUPER_ADMIN → SuperAdminStack (company management only)
+#    - admin/COMPANY_ADMIN → AdminStack (company-scoped)
+#    - employee → AppStack (own data only)
+#
+# TO UPGRADE TO FULL FIREBASE AUTH SECURITY:
+# 1. Migrate to Firebase Auth (email/password or custom tokens)
+# 2. Pass the Firebase ID token in Authorization header on all REST calls
+# 3. Deploy the Firestore rules below — they will then be enforced server-side
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# FIRESTORE RULES (enforced only when Firebase Auth tokens are used)
+# ─────────────────────────────────────────────────────────────────────────────
 
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ==================== HELPER FUNCTIONS ====================
-    
+
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -17,311 +53,74 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function hasRole(roles) {
-      return isAuthenticated() && getUserData().role in roles;
-    }
-
     function isSuperAdmin() {
-      return hasRole(['super_admin']);
+      return isAuthenticated() && getUserData().role == 'SUPER_ADMIN';
     }
 
-    function isHR() {
-      return hasRole(['super_admin', 'hr']);
-    }
-
-    function isManager() {
-      return hasRole(['super_admin', 'manager']);
+    function isCompanyAdmin() {
+      return isAuthenticated() &&
+        (getUserData().role == 'admin' || getUserData().role == 'COMPANY_ADMIN');
     }
 
     function isOwnUser(userId) {
       return request.auth.uid == userId;
     }
 
-    function hasPermission(permission) {
-      return isAuthenticated() && permission in getUserData().permissions;
+    function sameCompany(companyId) {
+      return isAuthenticated() && getUserData().companyId == companyId;
     }
 
-    function isTeamManager(employeeId) {
-      let userData = getUserData();
-      return userData.role == 'manager' && 
-             (employeeId in userData.managedEmployees);
-    }
-
-    function canAccessEmployeeData(employeeId) {
-      return isSuperAdmin() || 
-             isOwnUser(employeeId) ||
-             isTeamManager(employeeId) ||
-             (isHR() && getUserData().companyId == 
-                get(/databases/$(database)/documents/users/$(employeeId)).data.companyId);
-    }
-
-    // ==================== USERS COLLECTION ====================
-    
+    // ── Users ──────────────────────────────────────────────────────────────
     match /users/{userId} {
-      // Read: Own data, admins, or managers of this user
-      allow read: if isOwnUser(userId) || 
-                     isSuperAdmin() ||
-                     (isHR() && getUserData().companyId == resource.data.companyId) ||
-                     isTeamManager(userId);
-
-      // Write: Only own basic data or admins
+      allow read: if isOwnUser(userId) || isSuperAdmin() ||
+                     (isCompanyAdmin() && sameCompany(resource.data.companyId));
       allow write: if isOwnUser(userId) || isSuperAdmin();
-
-      // Create: Super admin or HR can create employees
-      allow create: if (isSuperAdmin() || isHR()) && 
-                       request.resource.data.role in ['super_admin', 'hr', 'manager', 'employee'];
-
-      // Update: Specific field-level access
-      allow update: if (isOwnUser(userId) && 
-                        request.resource.data.keys().hasOnly(['name', 'phone', 'dateOfBirth', 'profilePhoto'])) ||
-                       (isSuperAdmin() && request.resource.data.keys().hasOnly(
-                         ['name', 'phone', 'departmentId', 'role', 'status', 'permissions']));
-
-      // Delete: Super admin only (soft delete)
-      allow delete: if isSuperAdmin();
-
-      // Nested rules for user metadata
-      match /metadata/{document=**} {
-        allow read: if isOwnUser(userId) || isSuperAdmin();
-        allow write: if isSuperAdmin();
-      }
     }
 
-    // ==================== ATTENDANCE COLLECTION ====================
-    
+    // ── Attendance ─────────────────────────────────────────────────────────
     match /attendance/{attendanceId} {
-      // Read: Own records, managers, or HR
-      allow read: if isOwnUser(resource.data.userId) ||
-                     isSuperAdmin() ||
-                     (isHR() && getUserData().companyId == resource.data.companyId) ||
-                     isTeamManager(resource.data.userId);
+      // Read: own record, company admin of same company, or super admin
+      allow read: if isAuthenticated() && (
+        isOwnUser(resource.data.userId) ||
+        isSuperAdmin() ||
+        (isCompanyAdmin() && sameCompany(resource.data.companyId))
+      );
 
-      // Create: User can check-in/out, HR can manual entry
-      allow create: if (isOwnUser(request.resource.data.userId) && 
-                        request.resource.data.manualEntry == false) ||
-                       (isHR() && hasPermission('override_attendance'));
-
-      // Update: HR/Admin only (for corrections/approvals)
-      allow update: if (isSuperAdmin() || isHR()) && 
-                       hasPermission('approve_attendance');
-
-      // Delete: Super admin only with reason
-      allow delete: if isSuperAdmin() && request.resource.data.status != 'approved';
-    }
-
-    // ==================== FACE TEMPLATES COLLECTION ====================
-    
-    match /faces/{userId} {
-      // Read: Own face data and admins
-      allow read: if isOwnUser(userId) || isSuperAdmin();
-
-      // Create/Update: User registers own face or admin
-      allow write: if isOwnUser(userId) ||
-                      (isSuperAdmin() && hasPermission('manage_faces'));
-
-      // Delete: User or admin (GDPR compliance)
-      allow delete: if isOwnUser(userId) || isSuperAdmin();
-    }
-
-    // ==================== DEPARTMENTS COLLECTION ====================
-    
-    match /departments/{deptId} {
-      // Read: Any authenticated user can view departments
-      allow read: if isAuthenticated();
-
-      // Write: HR/Admin only
-      allow write: if isHR();
-
-      // Delete: Super admin only
-      allow delete: if isSuperAdmin();
-    }
-
-    // ==================== LEAVES COLLECTION ====================
-    
-    match /leaves/{leaveId} {
-      // Read: Own leaves, managers, or HR
-      allow read: if isOwnUser(resource.data.userId) ||
-                     isSuperAdmin() ||
-                     (isHR() && hasPermission('approve_leave')) ||
-                     isTeamManager(resource.data.userId);
-
-      // Create: Employee applies for leave
-      allow create: if isOwnUser(request.resource.data.userId) &&
-                       request.resource.data.status == 'pending';
-
-      // Update: Employee can update pending, HR can approve
-      allow update: if (isOwnUser(resource.data.userId) && 
-                        resource.data.status == 'pending' &&
-                        request.resource.data.status == 'pending') ||
-                       (isHR() && hasPermission('approve_leave') &&
-                        (request.resource.data.status == 'approved' ||
-                         request.resource.data.status == 'rejected'));
-
-      // Delete: Not allowed (soft delete only)
-      allow delete: if false;
-    }
-
-    // ==================== ATTENDANCE CORRECTIONS COLLECTION ====================
-    
-    match /attendance_corrections/{correctionId} {
-      // Read: Own corrections or HR/Admin
-      allow read: if isOwnUser(resource.data.userId) ||
-                     isSuperAdmin() ||
-                     (isHR() && hasPermission('approve_corrections'));
-
-      // Create: Employee can request correction
-      allow create: if isOwnUser(request.resource.data.userId) &&
-                       request.resource.data.status == 'pending';
-
-      // Update: HR/Admin can approve/reject
-      allow update: if (isSuperAdmin() || isHR()) &&
-                       hasPermission('approve_corrections') &&
-                       (request.resource.data.status == 'approved' ||
-                        request.resource.data.status == 'rejected');
-
-      // Delete: Not allowed
-      allow delete: if false;
-    }
-
-    // ==================== REPORTS COLLECTION ====================
-    
-    match /reports/{reportId} {
-      // Read: Own reports or HR/Admin
-      allow read: if isOwnUser(resource.data.userId) ||
-                     isSuperAdmin() ||
-                     (isHR() && hasPermission('view_reports'));
-
-      // Create: HR/Admin can generate
-      allow create: if isHR() && hasPermission('view_reports');
-
-      // Update: Not allowed
-      allow update: if false;
-
-      // Delete: Only admin and after expiry
-      allow delete: if isSuperAdmin() &&
-                       request.time > resource.data.expiryAt;
-    }
-
-    // ==================== ACTIVITY LOGS COLLECTION ====================
-    
-    match /activity_logs/{logId} {
-      // Read: HR/Admin only
-      allow read: if isHR();
-
-      // Create: Any authenticated user (logging their own actions)
+      // Employee self-write: userId must match auth uid, companyId must match
       allow create: if isAuthenticated() &&
-                       request.resource.data.userId == request.auth.uid;
+        isOwnUser(request.resource.data.userId) &&
+        request.resource.data.companyId == getUserData().companyId;
 
-      // Update/Delete: Not allowed
-      allow update, delete: if false;
-    }
+      // Employee update own record (punch out, breaks)
+      allow update: if isAuthenticated() &&
+        isOwnUser(resource.data.userId) &&
+        resource.data.companyId == getUserData().companyId;
 
-    // ==================== NOTIFICATIONS COLLECTION ====================
-    
-    match /notifications/{notificationId} {
-      // Read: Own notifications
-      allow read: if isOwnUser(resource.data.userId);
+      // Admin correction: same company only
+      allow write: if isCompanyAdmin() &&
+        sameCompany(request.resource.data.companyId);
 
-      // Create: System/admin only
-      allow create: if isSuperAdmin();
-
-      // Update: User can mark as read
-      allow update: if isOwnUser(resource.data.userId) &&
-                       request.resource.data.diff(resource.data).affectedKeys()
-                         .hasOnly(['isRead', 'readAt']);
-
-      // Delete: User can delete own
-      allow delete: if isOwnUser(resource.data.userId);
-    }
-
-    // ==================== ADMIN SETTINGS COLLECTION ====================
-    
-    match /settings/{document=**} {
-      // Read: Any authenticated user
-      allow read: if isAuthenticated();
-
-      // Write: HR/Admin only
-      allow write: if isHR();
-    }
-
-    // ==================== SHIFT CONFIGURATIONS ====================
-    
-    match /shifts/{shiftId} {
-      // Read: Any authenticated user
-      allow read: if isAuthenticated();
-
-      // Write: HR/Admin only
-      allow write: if isHR();
-    }
-
-    // ==================== COMPANIES COLLECTION ====================
-    
-    match /companies/{companyId} {
-      // Read: Company members
-      allow read: if isAuthenticated() && 
-                     (isSuperAdmin() ||
-                      getUserData().companyId == companyId);
-
-      // Write: Super admin only
+      // Super admin: unrestricted
       allow write: if isSuperAdmin();
     }
 
-    // ==================== CATCH-ALL (Deny by default) ====================
-    
+    // ── Office Settings ────────────────────────────────────────────────────
+    match /office_settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin() || isCompanyAdmin();
+    }
+
+    // ── Companies ──────────────────────────────────────────────────────────
+    match /companies/{companyId} {
+      allow read: if isAuthenticated() && (
+        isSuperAdmin() || getUserData().companyId == companyId
+      );
+      allow write: if isSuperAdmin();
+    }
+
+    // ── Catch-all: deny by default ─────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;
     }
   }
 }
-
-/*
-  DEPLOYMENT INSTRUCTIONS:
-  
-  1. Go to Firebase Console
-  2. Select your project
-  3. Navigate to Firestore Database
-  4. Go to "Rules" tab
-  5. Copy and paste this entire file
-  6. Click "Publish"
-  7. Confirm the deployment
-  
-  TESTING:
-  
-  // Test Super Admin access
-  - Role: 'super_admin'
-  - Permissions: ['*']
-  
-  // Test HR access
-  - Role: 'hr'
-  - Permissions: ['manage_employees', 'approve_attendance', 'view_reports']
-  
-  // Test Manager access
-  - Role: 'manager'
-  - Permissions: ['view_team_attendance', 'approve_team_leave']
-  
-  // Test Employee access
-  - Role: 'employee'
-  - Permissions: ['check_in_out', 'view_own_attendance']
-
-  IMPORTANT NOTES:
-  
-  1. These rules enforce role-based access control (RBAC)
-  2. All sensitive operations require authentication
-  3. Users can only access their own data by default
-  4. Admins have elevated access with permission checks
-  5. Activity logging is enforced for compliance
-  6. Soft deletes are enforced (no hard deletes for users)
-  7. Field-level security is implemented
-  8. Time-based access (e.g., leave expiry) is supported
-  
-  SECURITY BEST PRACTICES:
-  
-  ✅ Never trust client-side auth
-  ✅ Always validate permissions on server
-  ✅ Use field-level rules for sensitive data
-  ✅ Implement audit logging
-  ✅ Enforce role-based access
-  ✅ Validate data types and formats
-  ✅ Limit query results
-  ✅ Use composite indexes for complex queries
-*/
