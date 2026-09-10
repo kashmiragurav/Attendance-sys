@@ -51,6 +51,7 @@ export default function SuperAdminCompanyDetailsScreen({ route, navigation }) {
     const [isWifiModalVisible, setIsWifiModalVisible] = useState(false);
     const [wifiList, setWifiList] = useState([]);
     const [newWifiSSID, setNewWifiSSID] = useState('');
+    const [newWifiBSSID, setNewWifiBSSID] = useState('');
     const [wifiRestrictionEnabled, setWifiRestrictionEnabled] = useState(false);
 
     useEffect(() => {
@@ -67,8 +68,12 @@ export default function SuperAdminCompanyDetailsScreen({ route, navigation }) {
                 const data = companyDoc.data();
                 setCompany({ id: companyDoc.id, ...data });
 
-                // Load WiFi Settings
-                setWifiList(data.allowedWifis || []);
+                // Load WiFi Settings — normalise legacy string array to object array
+                const rawWifis = data.allowedWifis || [];
+                const normalisedWifis = rawWifis.map(w =>
+                    typeof w === 'string' ? { ssid: w } : w
+                );
+                setWifiList(normalisedWifis);
                 setWifiRestrictionEnabled(data.wifiRestrictionEnabled || false);
             }
 
@@ -280,17 +285,20 @@ export default function SuperAdminCompanyDetailsScreen({ route, navigation }) {
     };
 
     const handleAddWifi = () => {
-        if (!newWifiSSID.trim()) return;
-        if (wifiList.includes(newWifiSSID.trim())) {
+        const ssid = newWifiSSID.trim();
+        if (!ssid) return;
+        const bssid = newWifiBSSID.trim().toLowerCase() || undefined;
+        if (wifiList.some(w => w.ssid?.toLowerCase() === ssid.toLowerCase())) {
             Alert.alert('Error', 'This WiFi SSID is already on the list');
             return;
         }
-        setWifiList([...wifiList, newWifiSSID.trim()]);
+        setWifiList([...wifiList, bssid ? { ssid, bssid } : { ssid }]);
         setNewWifiSSID('');
+        setNewWifiBSSID('');
     };
 
     const handleRemoveWifi = (ssid) => {
-        setWifiList(wifiList.filter(w => w !== ssid));
+        setWifiList(wifiList.filter(w => w.ssid !== ssid));
     };
 
     const handleUpdateSubscription = async () => {
@@ -566,28 +574,42 @@ export default function SuperAdminCompanyDetailsScreen({ route, navigation }) {
                             </TouchableOpacity>
                         </View>
 
-                        <Text style={styles.inputLabel}>Add Allowed WiFi (SSID Name)</Text>
+                        <Text style={styles.inputLabel}>Add Allowed WiFi Network</Text>
                         <View style={styles.addWifiRow}>
                             <TextInput
                                 style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                                placeholder="e.g. Office_WiFi_5G"
+                                placeholder="SSID (e.g. Office_WiFi_5G)"
                                 value={newWifiSSID}
                                 onChangeText={setNewWifiSSID}
+                                autoCapitalize="none"
                             />
                             <TouchableOpacity style={styles.addWifiBtn} onPress={handleAddWifi}>
                                 <Ionicons name="add" size={24} color="#FFF" />
                             </TouchableOpacity>
                         </View>
+                        <TextInput
+                            style={[styles.input, { marginBottom: 16 }]}
+                            placeholder="BSSID/MAC (optional, e.g. aa:bb:cc:dd:ee:ff)"
+                            value={newWifiBSSID}
+                            onChangeText={setNewWifiBSSID}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                        />
 
                         <Text style={styles.inputLabel}>Allowed Networks List ({wifiList.length})</Text>
                         <ScrollView style={styles.wifiList} nestedScrollEnabled>
-                            {wifiList.map((ssid, index) => (
+                            {wifiList.map((network, index) => (
                                 <View key={index} style={styles.wifiItem}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
                                         <Ionicons name="wifi" size={18} color="#2C3E50" />
-                                        <Text style={styles.wifiName}>{ssid}</Text>
+                                        <View>
+                                            <Text style={styles.wifiName}>{network.ssid}</Text>
+                                            {network.bssid && (
+                                                <Text style={styles.wifiBssid}>{network.bssid}</Text>
+                                            )}
+                                        </View>
                                     </View>
-                                    <TouchableOpacity onPress={() => handleRemoveWifi(ssid)}>
+                                    <TouchableOpacity onPress={() => handleRemoveWifi(network.ssid)}>
                                         <Ionicons name="trash-outline" size={20} color="#E74C3C" />
                                     </TouchableOpacity>
                                 </View>
@@ -884,5 +906,6 @@ const styles = StyleSheet.create({
     wifiList: { maxHeight: 200, backgroundColor: '#F8F9FA', borderRadius: 12, padding: 10, borderWidth: 1, borderColor: '#ECF0F1', marginBottom: 20 },
     wifiItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#EEE' },
     wifiName: { fontSize: 14, color: '#2C3E50', fontWeight: '500' },
+    wifiBssid: { fontSize: 11, color: '#95A5A6', marginTop: 1 },
     emptyText: { textAlign: 'center', color: '#BDC3C7', marginVertical: 20 },
 });

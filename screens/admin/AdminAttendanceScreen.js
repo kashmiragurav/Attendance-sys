@@ -164,14 +164,24 @@ export default function AdminAttendanceScreen({ navigation }) {
                         <Text style={styles.timeLabel}>Work Hours</Text>
                         <Text style={styles.timeValue}>{item.workHours?.toFixed(1) || '0.0'} hrs</Text>
                     </View>
+                    <View style={styles.timeCol}>
+                        <Text style={styles.timeLabel}>Mode</Text>
+                        <Text style={[styles.timeValue, { fontSize: 11, color: item.attendanceMode === 'WFH' ? '#F39C12' : '#4A90E2' }]}>
+                            {item.attendanceMode === 'WFH' ? '🏠 WFH' : '🏢 Office'}
+                        </Text>
+                    </View>
                 </View>
 
-                {/* Location Indicator */}
-                {(item.location || item.checkoutLocation) && (
+                {/* Location / Mode Indicator */}
+                {(item.location || item.checkoutLocation || item.attendanceMode) && (
                     <View style={styles.locationIndicator}>
-                        <Ionicons name="location" size={14} color="#4A90E2" />
-                        <Text style={styles.locationIndicatorText}>
-                            Location tracked
+                        <Ionicons
+                            name={item.attendanceMode === 'WFH' ? 'home' : 'location'}
+                            size={14}
+                            color={item.attendanceMode === 'WFH' ? '#F39C12' : '#4A90E2'}
+                        />
+                        <Text style={[styles.locationIndicatorText, item.attendanceMode === 'WFH' && { color: '#F39C12' }]}>
+                            {item.attendanceMode === 'WFH' ? 'WFH' : 'Location tracked'}
                         </Text>
                     </View>
                 )}

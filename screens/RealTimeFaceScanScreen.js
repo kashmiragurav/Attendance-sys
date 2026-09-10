@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -25,11 +24,14 @@ import { getDetailedAddress } from '../services/googleMapsService'; // Assuming 
 import { calculateAttendanceStatus, formatDate, formatTime } from '../utils/attendance';
 import { resolveConfig } from '../utils/attendanceConfig';
 import { acquireLocation, validateGeoFence } from '../utils/locationValidator';
+import { uploadAttendancePhoto } from '../utils/photoUpload';
+import { validateWifi } from '../utils/wifiValidator';
 import { faceDetectorSettings, isNativeDetectorAvailable } from '../utils/faceRecognition';
 
 export default function RealTimeFaceScanScreen({ navigation, route }) {
     const { user, isFeatureEnabled, FEATURES, updateProfile, company } = useAuth();
     const { action, onSuccess, isWFH } = route.params || {};
+    const attendanceMode = isWFH ? 'WFH' : 'OFFICE';
     const [permission, requestPermission] = useCameraPermissions();
     const cameraRef = useRef(null);
 
@@ -178,58 +180,25 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
     };
 
     const checkWifi = async () => {
+        // WFH employees are not on the office network — skip WiFi restriction
+        if (isWFH) return true;
         if (!company?.wifiRestrictionEnabled) return true;
 
-        try {
-            const state = await NetInfo.fetch();
+        const allowedNetworks = company.allowedWifis || [];
+        const result = await validateWifi(allowedNetworks);
 
-            // 1. Check if connected to WiFi
-            if (state.type !== 'wifi') {
-                Alert.alert(
-                    'WiFi Required',
-                    'You must be connected to an approved WiFi network to mark attendance.',
-                    [{ text: 'OK' }]
-                );
-                return false;
-            }
-
-            // 2. Strict SSID Check (If allowed list exists)
-            const allowedWifis = company.allowedWifis || [];
-            if (allowedWifis.length > 0) {
-                let currentSSID = state.details?.ssid;
-
-                // Handle Android specific quotes or null
-                if (currentSSID) {
-                    currentSSID = currentSSID.replace(/^"(.*)"$/, '$1');
-                }
-
-                // If SSID cannot be read (common on modern Android without location permission/service)
-                if (!currentSSID || currentSSID === '<unknown ssid>') {
-                    // FAIL OPEN: We allow it because blocking valid users due to OS restrictions is bad UX.
-                    console.log('⚠️ Could not verify SSID, but connected to WiFi. Allowing.');
-                    return true;
-                }
-
-                const isAllowed = allowedWifis.some(wifi =>
-                    wifi.trim().toLowerCase() === currentSSID.trim().toLowerCase()
-                );
-
-                if (!isAllowed) {
-                    Alert.alert(
-                        'Wrong WiFi Network',
-                        `You are connected to "${currentSSID}".\nPlease connect to one of the authorized office networks.`,
-                        [{ text: 'OK' }]
-                    );
-                    return false;
-                }
-            }
-
-            return true;
-        } catch (e) {
-            console.log('WiFi Check Warning (Suppressed):', e.message);
-            // FAIL OPEN if crash
+        if (result.failOpen) {
+            // OS prevented SSID/BSSID reading — logged, attendance allowed
+            console.warn('[checkWifi] Fail-open:', result.code, result.reason);
             return true;
         }
+
+        if (!result.allowed) {
+            Alert.alert('WiFi Validation Failed', result.reason, [{ text: 'OK' }]);
+            return false;
+        }
+
+        return true;
     };
 
     const handleCapture = async () => {
@@ -317,7 +286,7 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
             // Track whether this was a real verification or simulated
             const isSimulated = apiResult.simulated === true;
 
-            // 2. Geo-fencing check
+            // 2. Geo-fencing check — WFH skips geo-fence but GPS is still captured for audit
             if (isFeatureEnabled(FEATURES.GEO_LOCATION) && officeSettings?.geoFencing?.enabled && !isWFH) {
                 const coordsToCheck = location || null;
                 if (!coordsToCheck) {
@@ -356,29 +325,42 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
         try {
             const now = new Date();
             const today = formatDate(now);
-            const imageField = action === 'check-in' ? 'checkInImage' : 'checkOutImage';
-            const formattedImage = `data:image/jpeg;base64,${base64Image}`;
 
-            // Targeted lookup for today's record
-            const attendanceResult = await db.collection('attendance').getDocs(); // Assuming this works with custom wrapper
-            // Note: In custom wrapper getDocs returns { docs: [...] }
-            // and we need to filter manually if default query not sufficient
-
-            // Optimization: Use where clause if possible. The custom wrapper supports ONE where clause usually?
-            // Actually, the previous code used getDocs() and .find(). I will stick to that to be safe.
-
-            const docs = attendanceResult.docs || [];
+            const docs = (await db.collection('attendance').getDocs()).docs || [];
             const todayRecord = docs.find(doc => {
-                const docData = doc.data();
-                return docData.userId === user.uid && docData.date === today;
+                const d = doc.data();
+                return d.userId === user.uid && d.date === today;
             });
 
             if (action === 'check-in') {
-                // Check-in logic
                 const attendanceId = todayRecord ? todayRecord.id : `att_${user.uid}_${today}`;
+                const existingSessions = todayRecord ? (todayRecord.data().sessions || []) : [];
+                const sessionIndex = existingSessions.length; // new session will be appended at this index
                 const settings = resolveConfig(officeSettings);
-
                 const status = calculateAttendanceStatus(now, null, settings);
+
+                // Upload photo non-blocking — attendance is saved regardless of upload outcome
+                const photoResult = await uploadAttendancePhoto({
+                    companyId: user.companyId,
+                    userId: user.uid,
+                    date: today,
+                    sessionIndex,
+                    action: 'check-in',
+                    base64: base64Image,
+                });
+                if (!photoResult.ok) console.warn('[Photo] Upload failed:', photoResult.error);
+
+                const newSession = {
+                    checkIn: now.toISOString(),
+                    checkInTime: formatTime(now),
+                    checkOut: null,
+                    checkOutTime: null,
+                    sessionHours: 0,
+                    location: location,
+                    checkInPhotoUrl: photoResult.url || null,
+                };
+
+                const sessions = [...existingSessions, newSession];
 
                 const attendanceData = {
                     id: attendanceId,
@@ -389,47 +371,47 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                     date: today,
                     checkIn: now.toISOString(),
                     checkInTime: formatTime(now),
-                    [imageField]: formattedImage,
                     checkOut: null,
                     checkOutTime: null,
                     status: status.isLate ? 'late' : 'present',
                     workHours: 0,
-                    sessions: [{
-                        checkIn: now.toISOString(),
-                        checkInTime: formatTime(now),
-                        checkOut: null,
-                        checkOutTime: null,
-                        sessionHours: 0,
-                        location: location,
-                    }],
+                    sessions,
                     isLate: status.isLate,
                     lateMinutes: status.lateMinutes || 0,
-                    method: isWFH ? 'wfh_scan' : 'face_scan',
-                    // faceVerified is true only when the backend performed a real embedding comparison.
-                    // When SIMULATION_MODE is on, this is false — the record is honest.
+                    method: isWFH ? 'wfh_face_scan' : 'face_scan',
                     faceVerified: !isSimulated,
-                    isWFH: !!isWFH,
+                    attendanceMode,
                     deviceId: await AsyncStorage.getItem('app_device_id') || 'Unknown',
                     location: location,
-                    createdAt: now.toISOString(),
+                    createdAt: todayRecord ? todayRecord.data().createdAt : now.toISOString(),
                     updatedAt: now.toISOString(),
                 };
 
                 await db.collection('attendance').doc(attendanceId).set(attendanceData);
             } else {
-                // Check-out logic
+                // Check-out
                 if (!todayRecord || !todayRecord.data().checkIn) {
                     throw new Error('Please check-in first');
                 }
 
                 const data = todayRecord.data();
-                const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+                const sessions = Array.isArray(data.sessions) ? [...data.sessions] : [];
                 const currentSessionIndex = sessions.findIndex(s => !s.checkOut);
 
                 if (currentSessionIndex !== -1) {
                     const currentSession = sessions[currentSessionIndex];
-                    const sessionCheckInTime = new Date(currentSession.checkIn);
-                    const sessionHours = (now - sessionCheckInTime) / (1000 * 60 * 60);
+                    const sessionHours = (now - new Date(currentSession.checkIn)) / (1000 * 60 * 60);
+
+                    // Upload photo non-blocking
+                    const photoResult = await uploadAttendancePhoto({
+                        companyId: user.companyId,
+                        userId: user.uid,
+                        date: today,
+                        sessionIndex: currentSessionIndex,
+                        action: 'check-out',
+                        base64: base64Image,
+                    });
+                    if (!photoResult.ok) console.warn('[Photo] Upload failed:', photoResult.error);
 
                     sessions[currentSessionIndex] = {
                         ...currentSession,
@@ -437,10 +419,22 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                         checkOutTime: formatTime(now),
                         sessionHours: parseFloat(sessionHours.toFixed(2)),
                         checkoutLocation: location,
+                        checkOutPhotoUrl: photoResult.url || null,
                     };
                 } else {
+                    // No open session — synthesise one from the top-level checkIn
                     const mainCheckInTime = new Date(data.checkIn);
                     const sessionHours = (now - mainCheckInTime) / (1000 * 60 * 60);
+
+                    const photoResult = await uploadAttendancePhoto({
+                        companyId: user.companyId,
+                        userId: user.uid,
+                        date: today,
+                        sessionIndex: sessions.length,
+                        action: 'check-out',
+                        base64: base64Image,
+                    });
+                    if (!photoResult.ok) console.warn('[Photo] Upload failed:', photoResult.error);
 
                     sessions.push({
                         checkIn: data.checkIn,
@@ -450,33 +444,28 @@ export default function RealTimeFaceScanScreen({ navigation, route }) {
                         sessionHours: parseFloat(sessionHours.toFixed(2)),
                         location: data.location || null,
                         checkoutLocation: location,
+                        checkOutPhotoUrl: photoResult.url || null,
                     });
                 }
 
-                const totalWorkHours = sessions.reduce((total, session) => {
-                    return total + (session.sessionHours || 0);
-                }, 0);
-
+                const totalWorkHours = sessions.reduce((t, s) => t + (s.sessionHours || 0), 0);
                 const firstCheckIn = new Date(sessions[0].checkIn);
                 const status = calculateAttendanceStatus(firstCheckIn, now, {
                     ...resolveConfig(officeSettings),
                     workHours: totalWorkHours,
                 });
 
-                const updatedAttendance = {
+                await db.collection('attendance').doc(todayRecord.id).set({
                     ...data,
                     companyId: user.companyId,
                     checkOut: now.toISOString(),
                     checkOutTime: formatTime(now),
-                    [imageField]: formattedImage,
-                    sessions: sessions,
+                    sessions,
                     workHours: parseFloat(totalWorkHours.toFixed(2)),
                     status: status.status,
                     checkoutLocation: location,
                     updatedAt: now.toISOString(),
-                };
-
-                await db.collection('attendance').doc(todayRecord.id).set(updatedAttendance);
+                });
             }
         } catch (error) {
             console.error('Error marking attendance:', error);
